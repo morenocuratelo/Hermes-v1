@@ -1,0 +1,83 @@
+{
+    "name": "BW Invasion Standard",
+    "roles": {
+        "Target": [
+            {
+                "name": "Head",
+                "kps": [
+                    0,
+                    1,
+                    2,
+                    3,
+                    4
+                ],
+                "margin_px": 30,
+                "expand_factor": 1.0
+            },
+            {
+                "name": "Body",
+                "kps": [
+                    5,
+                    6,
+                    7,
+                    8,
+                    9,
+                    10,
+                    11,
+                    12,
+                    13,
+                    14
+                ],
+                "margin_px": 20,
+                "expand_factor": 1.0
+            },
+            {
+                "name": "Feet",
+                "kps": [
+                    15,
+                    16
+                ],
+                "margin_px": 20,
+                "expand_factor": 1.0,
+                "offset_y_bottom": 30
+            },
+            {
+                "name": "Peripersonal",
+                "kps": [
+                    5,
+                    6,
+                    11,
+                    12
+                ],
+                "margin_px": 0,
+                "expand_factor": 2.5
+            }
+        ],
+        "DEFAULT": [
+            {
+                "name": "FullBody",
+                "kps": [
+                    0,
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6,
+                    7,
+                    8,
+                    9,
+                    10,
+                    11,
+                    12,
+                    13,
+                    14,
+                    15,
+                    16
+                ],
+                "margin_px": 20,
+                "expand_factor": 1.0
+            }
+        ]
+    }
+}
