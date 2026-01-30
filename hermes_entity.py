@@ -11,7 +11,7 @@ from PIL import Image, ImageTk
 class IdentityMapperV7:
     def __init__(self, root):
         self.root = root
-        self.root.title("Identity Mapper v7.0 (Batch Merge) - Lab Modigliani")
+        self.root.title("Identity Mapper v7.1 (Custom Params) - Lab Modigliani")
         self.root.geometry("1600x950")
         
         # DATI
@@ -23,6 +23,16 @@ class IdentityMapperV7:
         self.tracks = {} 
         self.id_lineage = {} 
         
+        # --- PARAMETRI CONFIGURABILI (Default da immagine) ---
+        # Unsupervised Auto-Stitching
+        self.param_lookahead = 15      # Window size (tracks)
+        self.param_time_gap = 2.0      # Seconds (occlusion tolerance)
+        self.param_stitch_dist = 150   # Pixels (centroid distance)
+        
+        # Supervised Noise Absorption
+        self.param_noise_dist = 100    # Pixels (tighter precision)
+        # -----------------------------------------------------
+
         # CAST
         self.cast = {
             "Target": {"color": (0, 255, 0)},       
@@ -82,8 +92,13 @@ class IdentityMapperV7:
         # TOOLBAR
         tools = tk.Frame(lbl_tracks)
         tools.pack(fill=tk.X, pady=5)
+        
+        # Checkbox nascondi brevi
         chk = tk.Checkbutton(tools, text="Nascondi brevi (<1s)", variable=self.hide_short_var, command=self.refresh_tree)
         chk.pack(side=tk.LEFT, padx=5)
+
+        # --- NUOVO: BOTTONE SETTINGS ---
+        tk.Button(tools, text="⚙ Parametri", command=self.open_settings_dialog).pack(side=tk.RIGHT, padx=5)
         
         # PRIMA RIGA BOTTONI (Automazioni)
         row1 = tk.Frame(lbl_tracks)
@@ -95,8 +110,6 @@ class IdentityMapperV7:
         row2 = tk.Frame(lbl_tracks)
         row2.pack(fill=tk.X, pady=2)
         tk.Button(row2, text="🔗 Unisci Selezionati", command=self.manual_merge).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
-        
-        # --- NUOVO BOTTONE ---
         tk.Button(row2, text="🔗 Unisci TUTTI per Ruolo", bg="#d1e7dd", command=self.merge_all_by_role).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
         # TREEVIEW
@@ -123,59 +136,65 @@ class IdentityMapperV7:
         self.context_menu = tk.Menu(self.root, tearoff=0)
         self.refresh_cast_list()
 
-    # --- NUOVA FUNZIONE: MERGE BY ROLE ---
-    def merge_all_by_role(self):
-        """
-        Scansiona tutti i ruoli del Cast.
-        Per ogni ruolo, trova tutti gli ID assegnati e li fonde in un unico Master.
-        """
-        if not messagebox.askyesno("Conferma", "Vuoi unire tutte le tracce assegnate allo stesso ruolo in un'unica traccia?\n\nEsempio: Tutti i 'Target' diventeranno un solo ID 'Target'."):
-            return
-
-        merge_count = 0
-        roles_processed = []
-
-        # Itera su ogni persona del cast
-        for person_name in self.cast:
-            # Trova tutti gli ID che hanno questo ruolo
-            # Nota: usiamo list() perché modificheremo self.tracks durante il loop
-            ids_with_role = [tid for tid, data in self.tracks.items() if data['role'] == person_name]
-            
-            # Ordiniamo per ID (o potremmo ordinare per tempo di inizio)
-            ids_with_role.sort()
-
-            if len(ids_with_role) > 1:
-                # Il primo diventa il Master
-                master_id = ids_with_role[0]
-                
-                # Tutti gli altri vengono assorbiti
-                for slave_id in ids_with_role[1:]:
-                    self._merge_logic(master_id, slave_id)
-                    merge_count += 1
-                
-                roles_processed.append(person_name)
-
-        self.refresh_tree()
+    # --- NUOVA FEATURE: DIALOG PARAMETRI ---
+    def open_settings_dialog(self):
+        """Apre una finestra popup per modificare i parametri hardcoded."""
+        win = tk.Toplevel(self.root)
+        win.title("Impostazioni Algoritmi")
+        win.geometry("350x250")
         
-        if merge_count > 0:
-            msg = f"Fusi {merge_count} frammenti per i ruoli: {', '.join(roles_processed)}."
-        else:
-            msg = "Nessuna fusione necessaria (ogni ruolo ha già max 1 traccia)."
-            
-        messagebox.showinfo("Risultato Merge", msg)
+        # Variabili temporanee
+        v_lookahead = tk.IntVar(value=self.param_lookahead)
+        v_time = tk.DoubleVar(value=self.param_time_gap)
+        v_s_dist = tk.IntVar(value=self.param_stitch_dist)
+        v_n_dist = tk.IntVar(value=self.param_noise_dist)
+        
+        # Layout
+        tk.Label(win, text="1. Auto-Stitching", font=("bold")).pack(pady=(10,5))
+        
+        f1 = tk.Frame(win); f1.pack(fill=tk.X, padx=20)
+        tk.Label(f1, text="Look-ahead (tracks):").pack(side=tk.LEFT)
+        tk.Entry(f1, textvariable=v_lookahead, width=8).pack(side=tk.RIGHT)
+        
+        f2 = tk.Frame(win); f2.pack(fill=tk.X, padx=20)
+        tk.Label(f2, text="Max Time Gap (sec):").pack(side=tk.LEFT)
+        tk.Entry(f2, textvariable=v_time, width=8).pack(side=tk.RIGHT)
 
+        f3 = tk.Frame(win); f3.pack(fill=tk.X, padx=20)
+        tk.Label(f3, text="Max Distance (px):").pack(side=tk.LEFT)
+        tk.Entry(f3, textvariable=v_s_dist, width=8).pack(side=tk.RIGHT)
 
-    # --- ALTRE LOGICHE (Standard) ---
+        tk.Label(win, text="2. Noise Absorption", font=("bold")).pack(pady=(10,5))
+        
+        f4 = tk.Frame(win); f4.pack(fill=tk.X, padx=20)
+        tk.Label(f4, text="Precision Dist (px):").pack(side=tk.LEFT)
+        tk.Entry(f4, textvariable=v_n_dist, width=8).pack(side=tk.RIGHT)
+        
+        def save():
+            self.param_lookahead = v_lookahead.get()
+            self.param_time_gap = v_time.get()
+            self.param_stitch_dist = v_s_dist.get()
+            self.param_noise_dist = v_n_dist.get()
+            win.destroy()
+            messagebox.showinfo("Salvataggio", "Parametri aggiornati con successo.")
+
+        tk.Button(win, text="Salva", command=save, bg="#4CAF50", fg="white").pack(pady=15)
+
+    # --- LOGICHE AGGIORNATE CON PARAMETRI ---
 
     def absorb_noise_logic(self):
-        if not messagebox.askyesno("Conferma", "Assorbire il noise compatibile (gap filling)?"): return
+        """Supervised Noise Absorption usando i parametri configurabili."""
+        if not messagebox.askyesno("Conferma", f"Assorbire il noise (Dist < {self.param_noise_dist}px)?"): return
         
         main_tracks = [tid for tid, d in self.tracks.items() if d['role'] in self.cast]
         candidates = [tid for tid, d in self.tracks.items() if d['role'] not in self.cast]
         
         absorbed = 0
         changed = True
-        MAX_DIST = 100
+        
+        # Parametri dinamici
+        MAX_DIST = self.param_noise_dist
+        MAX_TIME_GAP = self.param_time_gap * self.fps
         
         while changed:
             changed = False
@@ -198,7 +217,7 @@ class IdentityMapperV7:
                     gap_after = c_frames[0] - main_frames[-1]
                     dist_after = float('inf')
                     
-                    if 0 < gap_after < (2.0*self.fps):
+                    if 0 < gap_after < MAX_TIME_GAP:
                         end_m = main_data['boxes'][main_data['frames'].index(main_frames[-1])]
                         start_c = cand_data['boxes'][0]
                         cm = ((end_m[0]+end_m[2])/2, (end_m[1]+end_m[3])/2)
@@ -208,7 +227,7 @@ class IdentityMapperV7:
                     gap_before = main_frames[0] - c_frames[-1]
                     dist_before = float('inf')
                     
-                    if 0 < gap_before < (2.0*self.fps):
+                    if 0 < gap_before < MAX_TIME_GAP:
                         end_c = cand_data['boxes'][-1]
                         start_m = main_data['boxes'][main_data['frames'].index(main_frames[0])]
                         cc = ((end_c[0]+end_c[2])/2, (end_c[1]+end_c[3])/2)
@@ -229,9 +248,16 @@ class IdentityMapperV7:
         messagebox.showinfo("Info", f"Assorbiti {absorbed} frammenti.")
 
     def auto_stitch(self):
+        """Unsupervised Auto-Stitching usando i parametri configurabili."""
+        # Recupera parametri
+        p_win = self.param_lookahead
+        p_time = self.param_time_gap
+        p_dist = self.param_stitch_dist
+        
         sorted_ids = sorted(self.tracks.keys(), key=lambda x: self.tracks[x]['frames'][0])
         merged = 0
         changed = True
+        
         while changed:
             changed = False
             curr_ids = sorted(self.tracks.keys(), key=lambda x: min(self.tracks[x]['frames']))
@@ -240,18 +266,26 @@ class IdentityMapperV7:
                 id_a = curr_ids[i]
                 best_match = None
                 min_dist = float('inf')
-                for j in range(i+1, min(i+15, len(curr_ids))):
+                
+                # Usa param_lookahead invece di 15 fisso
+                search_limit = min(i + p_win, len(curr_ids))
+                
+                for j in range(i+1, search_limit):
                     id_b = curr_ids[j]
                     t_a = self.tracks[id_a]; t_b = self.tracks[id_b]
+                    
                     gap = t_b['frames'][0] - t_a['frames'][-1]
-                    if gap < 0 or gap > (2.0 * self.fps): continue
+                    
+                    # Usa param_time_gap (converted to frames)
+                    if gap < 0 or gap > (p_time * self.fps): continue
                     
                     ba = t_a['boxes'][-1]; bb = t_b['boxes'][0]
                     ca = ((ba[0]+ba[2])/2, (ba[1]+ba[3])/2)
                     cb = ((bb[0]+bb[2])/2, (bb[1]+bb[3])/2)
                     d = math.sqrt((ca[0]-cb[0])**2 + (ca[1]-cb[1])**2)
                     
-                    if d < 150 and d < min_dist:
+                    # Usa param_stitch_dist
+                    if d < p_dist and d < min_dist:
                         min_dist = d; best_match = id_b
                 
                 if best_match:
@@ -259,7 +293,26 @@ class IdentityMapperV7:
                     merged += 1; changed = True; break
                 i += 1
         self.refresh_tree()
-        messagebox.showinfo("Info", f"Uniti {merged} frammenti.")
+        messagebox.showinfo("Info", f"Uniti {merged} frammenti (Lookahead:{p_win}, Time:{p_time}s, Dist:{p_dist}px).")
+
+    # --- STANDARD METHODS (Unchanged) ---
+    def merge_all_by_role(self):
+        if not messagebox.askyesno("Conferma", "Vuoi unire tutte le tracce assegnate allo stesso ruolo?"): return
+        merge_count = 0
+        roles_processed = []
+        for person_name in self.cast:
+            ids_with_role = [tid for tid, data in self.tracks.items() if data['role'] == person_name]
+            ids_with_role.sort()
+            if len(ids_with_role) > 1:
+                master_id = ids_with_role[0]
+                for slave_id in ids_with_role[1:]:
+                    self._merge_logic(master_id, slave_id)
+                    merge_count += 1
+                roles_processed.append(person_name)
+        self.refresh_tree()
+        if merge_count > 0: msg = f"Fusi {merge_count} frammenti per: {', '.join(roles_processed)}."
+        else: msg = "Nessuna fusione necessaria."
+        messagebox.showinfo("Risultato Merge", msg)
 
     def manual_merge(self):
         sel = self.tree.selection()
@@ -307,7 +360,6 @@ class IdentityMapperV7:
             b,g,r = self.cast[n]['color']
             self.tree.tag_configure(n, background='#{:02x}{:02x}{:02x}'.format(min(r+180,255), min(g+180,255), min(b+180,255)))
 
-    # --- BASE GUI METHODS ---
     def load_data(self):
         v = filedialog.askopenfilename(); 
         if not v: return
@@ -424,7 +476,6 @@ class IdentityMapperV7:
             if self.current_frame in d['frames']:
                 role = d['role']
                 # if hide and len(d['frames'])/self.fps < 1.0 and role not in self.cast: continue 
-                # (Lasciamo la visualizzazione video completa)
                 idx = d['frames'].index(self.current_frame)
                 box = d['boxes'][idx]
                 col = (100,100,100)

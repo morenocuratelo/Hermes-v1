@@ -104,10 +104,15 @@ class AOIBuilderDebug:
         f_prof = tk.Frame(right)
         f_prof.pack(fill=tk.X)
         tk.Label(f_prof, text="Profilo:").pack(side=tk.LEFT)
+        
         self.cb_profile = ttk.Combobox(f_prof, values=self.pm.list_profiles(), state="readonly")
         self.cb_profile.pack(side=tk.LEFT, padx=5)
         if self.pm.list_profiles(): self.cb_profile.current(0)
         self.cb_profile.bind("<<ComboboxSelected>>", self.on_profile_change)
+        
+        # --- NUOVO: Bottone Wizard ---
+        tk.Button(f_prof, text="✨ Nuovo (Wizard)", command=self.open_profile_wizard, bg="#e1f5fe").pack(side=tk.LEFT, padx=5)
+        # -----------------------------
         
         self.notebook = ttk.Notebook(right)
         self.notebook.pack(fill=tk.BOTH, expand=True, pady=10)
@@ -119,6 +124,107 @@ class AOIBuilderDebug:
         
         self.refresh_editors()
         tk.Button(right, text="GENERA E ESPORTA CSV AOI", bg="#4CAF50", fg="white", font=("Bold", 12), height=2, command=self.export_data).pack(side=tk.BOTTOM, fill=tk.X, pady=20)
+
+    def open_profile_wizard(self):
+        win = tk.Toplevel(self.root)
+        win.title("Wizard Profilo Avanzato")
+        win.geometry("450x650")
+        
+        # --- Variabili ---
+        v_name = tk.StringVar(value="New_Strategy_Profile")
+        
+        # Parametri Numerici
+        v_head_m = tk.IntVar(value=30)
+        v_body_m = tk.IntVar(value=20)
+        v_feet_m = tk.IntVar(value=20)
+        v_feet_off = tk.IntVar(value=30)
+        v_peri_exp = tk.DoubleVar(value=2.5)
+        
+        # Strategie (1=AOI Completi, 2=Solo Box, 0=Nascondi)
+        v_strat_target = tk.IntVar(value=1)
+        v_strat_others = tk.IntVar(value=2)
+        
+        # --- UI Layout ---
+        # SEZIONE 1: NOME E STRATEGIE
+        tk.Label(win, text="1. Nome e Strategie", font=("Bold", 12)).pack(pady=10)
+        
+        f_name = tk.Frame(win); f_name.pack(fill=tk.X, padx=20)
+        tk.Label(f_name, text="Nome File:").pack(side=tk.LEFT)
+        tk.Entry(f_name, textvariable=v_name).pack(side=tk.RIGHT, fill=tk.X, expand=True)
+
+        lf_strat = tk.LabelFrame(win, text="Modalità Visualizzazione", padx=10, pady=10)
+        lf_strat.pack(fill=tk.X, padx=20, pady=10)
+        
+        # Target Strategy
+        tk.Label(lf_strat, text="Ruolo 'Target':", font=("Bold", 9)).grid(row=0, column=0, sticky="w")
+        tk.Radiobutton(lf_strat, text="AOI Completi (Testa/Corpo...)", variable=v_strat_target, value=1).grid(row=0, column=1, sticky="w")
+        tk.Radiobutton(lf_strat, text="Solo Box Intero", variable=v_strat_target, value=2).grid(row=1, column=1, sticky="w")
+        
+        # --- CORREZIONE QUI: Usa ttk.Separator invece di tk.Separator ---
+        ttk.Separator(lf_strat, orient=tk.HORIZONTAL).grid(row=2, column=0, columnspan=2, sticky="ew", pady=5)
+        # ----------------------------------------------------------------
+        
+        # Others Strategy
+        tk.Label(lf_strat, text="Altri ID (Default):", font=("Bold", 9)).grid(row=3, column=0, sticky="w")
+        tk.Radiobutton(lf_strat, text="AOI Completi", variable=v_strat_others, value=1).grid(row=3, column=1, sticky="w")
+        tk.Radiobutton(lf_strat, text="Solo Box Intero", variable=v_strat_others, value=2).grid(row=4, column=1, sticky="w")
+        tk.Radiobutton(lf_strat, text="Nascondi (Nessun Box)", variable=v_strat_others, value=0).grid(row=5, column=1, sticky="w")
+
+        # SEZIONE 2: PARAMETRI DIMENSIONI
+        tk.Label(win, text="2. Configurazione Dimensioni", font=("Bold", 12)).pack(pady=(15,5))
+        
+        # Definizione funzione helper per i campi
+        def add_field(p, lbl, var):
+            f = tk.Frame(p); f.pack(fill=tk.X, padx=30, pady=2)
+            tk.Label(f, text=lbl).pack(side=tk.LEFT)
+            tk.Spinbox(f, from_=0, to=500, textvariable=var, width=8).pack(side=tk.RIGHT)
+
+        add_field(win, "Head Margin (px):", v_head_m)
+        add_field(win, "Body Margin (px):", v_body_m)
+        add_field(win, "Feet Margin (px):", v_feet_m)
+        add_field(win, "Feet Bottom Offset (px):", v_feet_off)
+        
+        f = tk.Frame(win); f.pack(fill=tk.X, padx=30, pady=2)
+        tk.Label(f, text="Peripersonal Expand (x):").pack(side=tk.LEFT)
+        tk.Spinbox(f, from_=1.0, to=5.0, increment=0.1, textvariable=v_peri_exp, width=8).pack(side=tk.RIGHT)
+
+        # --- Logica Salvataggio ---
+        def save_wiz():
+            name = v_name.get().strip()
+            if not name.endswith(".json"): name += ".json"
+            
+            def build_rules(strategy_code):
+                if strategy_code == 1: # AOI Completi
+                    return [
+                        {"name": "Head", "kps": [0,1,2,3,4], "margin_px": v_head_m.get(), "expand_factor": 1.0},
+                        {"name": "Body", "kps": [5,6,7,8,9,10,11,12,13,14], "margin_px": v_body_m.get(), "expand_factor": 1.0},
+                        {"name": "Feet", "kps": [15,16], "margin_px": v_feet_m.get(), "expand_factor": 1.0, "offset_y_bottom": v_feet_off.get()},
+                        {"name": "Peripersonal", "kps": [5,6,11,12], "margin_px": 0, "expand_factor": v_peri_exp.get()}
+                    ]
+                elif strategy_code == 2: # Solo Box
+                    return [
+                        {"name": "FullBody", "kps": list(range(17)), "margin_px": 20, "expand_factor": 1.0}
+                    ]
+                else: # Nascondi (0)
+                    return []
+
+            new_profile = {
+                "name": name.replace(".json", ""),
+                "roles": {
+                    "Target": build_rules(v_strat_target.get()),
+                    "DEFAULT": build_rules(v_strat_others.get())
+                }
+            }
+            
+            self.pm.save_profile(name, new_profile)
+            messagebox.showinfo("Successo", f"Profilo '{name}' salvato!")
+            win.destroy()
+            
+            self.cb_profile['values'] = self.pm.list_profiles()
+            self.cb_profile.set(name)
+            self.on_profile_change(None)
+
+        tk.Button(win, text="💾 GENERA PROFILO", bg="#4CAF50", fg="white", font=("Bold", 12), command=save_wiz).pack(side=tk.BOTTOM, fill=tk.X, pady=20)
 
     def refresh_editors(self):
         for widget in self.frame_target.winfo_children(): widget.destroy()
@@ -139,17 +245,27 @@ class AOIBuilderDebug:
             lf = tk.LabelFrame(frame, text=f"AOI: {rule['name']}", pady=5, padx=5)
             lf.pack(fill=tk.X, pady=5)
             
-            tk.Label(lf, text="Margine:").grid(row=0, column=0)
+            # 1. Margine
+            tk.Label(lf, text="Margine (px):").grid(row=0, column=0)
             s_margin = tk.Scale(lf, from_=0, to=100, orient=tk.HORIZONTAL)
             s_margin.set(rule.get("margin_px", 0))
             s_margin.grid(row=0, column=1, sticky="ew")
             s_margin.bind("<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_margin: self.update_rule_val(r, i, "margin_px", s.get()))
             
-            tk.Label(lf, text="Espansione:").grid(row=1, column=0)
+            # 2. Espansione
+            tk.Label(lf, text="Espansione (x):").grid(row=1, column=0)
             s_exp = tk.Scale(lf, from_=1.0, to=4.0, resolution=0.1, orient=tk.HORIZONTAL)
             s_exp.set(rule.get("expand_factor", 1.0))
             s_exp.grid(row=1, column=1, sticky="ew")
             s_exp.bind("<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_exp: self.update_rule_val(r, i, "expand_factor", s.get()))
+
+            # 3. (NUOVO) Offset Fondo - Solo se la regola lo prevede (es. Feet)
+            if "offset_y_bottom" in rule:
+                tk.Label(lf, text="Estensione Fondo:", fg="blue").grid(row=2, column=0)
+                s_off = tk.Scale(lf, from_=0, to=100, orient=tk.HORIZONTAL, fg="blue")
+                s_off.set(rule.get("offset_y_bottom", 0))
+                s_off.grid(row=2, column=1, sticky="ew")
+                s_off.bind("<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_off: self.update_rule_val(r, i, "offset_y_bottom", s.get()))
 
     def update_rule_val(self, role, idx, key, val):
         self.current_profile["roles"][role][idx][key] = val
