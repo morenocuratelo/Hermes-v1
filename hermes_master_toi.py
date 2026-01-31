@@ -8,12 +8,15 @@ import scipy.io as sio
 
 # --- GESTIONE PROFILI ---
 class ProfileManager:
-    def __init__(self, profiles_dir="profiles"):
+    def __init__(self, profiles_dir):
         self.profiles_dir = profiles_dir
         if not os.path.exists(self.profiles_dir):
-            os.makedirs(self.profiles_dir)
+            try:
+                os.makedirs(self.profiles_dir)
+            except OSError: pass # Già esiste o permessi
 
     def get_available_profiles(self):
+        if not os.path.exists(self.profiles_dir): return []
         return [f for f in os.listdir(self.profiles_dir) if f.endswith(".json")]
 
     def load_profile(self, filename):
@@ -157,8 +160,8 @@ class TOIGenerator:
         fixed_phases = profile.get('append_fixed_phases', [])
         fixed_anchor_col = profile.get('fixed_phase_anchor_column', 'auto')
 
-        for idx, row in df.iterrows():
-            trial_n = row.get('TrialN', idx+1)
+        for idx, (_, row) in enumerate(df.iterrows()):
+            trial_n = row.get('TrialN', idx + 1)
             condition = row.get(cond_col, 'NA')
             
             # --- FASE A: Intervalli Variabili ---
@@ -209,12 +212,19 @@ class TOIGenerator:
         out_df.to_csv(output_path, index=False, sep='\t')
         return len(toi_rows)
 
-class TOIGeneratorView: # <--- NOME CAMBIATO
-    def __init__(self, parent, context=None): # <--- ACCETTA CONTEXT
+class TOIGeneratorView:
+    def __init__(self, parent, context=None):
         self.parent = parent
         self.context = context
         
-        self.pm = ProfileManager()
+        # --- FIX: Usa path dal progetto ---
+        if self.context and self.context.paths["profiles_toi"]:
+            p_dir = self.context.paths["profiles_toi"]
+        else:
+            p_dir = "profiles_toi_fallback" # Fallback
+            
+        self.pm = ProfileManager(profiles_dir=p_dir)
+        
         self.tobii_file = tk.StringVar()
         self.matlab_file = tk.StringVar()
         self.output_file = tk.StringVar()
@@ -223,13 +233,9 @@ class TOIGeneratorView: # <--- NOME CAMBIATO
         self._build_ui()
 
     def _build_ui(self):
-        # Header visivo (opzionale ma consigliato per coerenza)
         tk.Label(self.parent, text="4. TOI Builder (Sync & Cut)", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 10), anchor="w")
-
-        main = tk.Frame(self.parent, padx=20, pady=20, bg="white") # <--- CORRETTO: self.parent
+        main = tk.Frame(self.parent, padx=20, pady=20, bg="white")
         main.pack(fill=tk.BOTH, expand=True)
-        
-        # Header
         tk.Label(main, text="TOI Builder - Lab Modigliani", font=("Segoe UI", 14, "bold")).pack(pady=(0, 20))
 
         # 1. Profilo
@@ -239,14 +245,12 @@ class TOIGeneratorView: # <--- NOME CAMBIATO
         self.cb.pack(fill=tk.X)
         self.refresh_profiles()
         ttk.Button(lf1, text="Aggiorna Lista", command=self.refresh_profiles).pack(pady=5)
-        # Nuovo bottone per lanciare il Wizard (importiamo dinamicamente per evitare loop)
         ttk.Button(lf1, text="➕ Crea Nuovo Profilo (Wizard)", command=self.launch_wizard).pack(pady=5)
 
         # 2. Input
         lf2 = tk.LabelFrame(main, text="2. Dati Input", padx=10, pady=10)
         lf2.pack(fill=tk.X, pady=10)
         self._add_picker(lf2, "Eventi Tobii (.json):", self.tobii_file, "*.json", 0)
-        # VERSIONE CORRETTA
         self._add_picker(lf2, "Results Matlab (.csv, .mat):", self.matlab_file, "*.csv *.mat", 2)
 
         # 3. Output
@@ -255,7 +259,6 @@ class TOIGeneratorView: # <--- NOME CAMBIATO
         tk.Entry(lf3, textvariable=self.output_file).pack(side=tk.LEFT, fill=tk.X, expand=True)
         tk.Button(lf3, text="Scegli...", command=self.save_as).pack(side=tk.LEFT, padx=5)
 
-        # Run
         tk.Button(main, text="GENERA TOI", bg="#007ACC", fg="white", font=("Arial", 11, "bold"), height=2, command=self.run).pack(fill=tk.X, pady=20)
 
     def _add_picker(self, p, lbl, var, ft, r):
@@ -273,7 +276,11 @@ class TOIGeneratorView: # <--- NOME CAMBIATO
         if f: 
             var.set(f)
             if self.matlab_file.get() and not self.output_file.get():
-                self.output_file.set(os.path.splitext(self.matlab_file.get())[0] + "_TOIs.tsv")
+                if self.context and self.context.paths["output"]:
+                    name = os.path.splitext(os.path.basename(f))[0] + "_TOIs.tsv"
+                    self.output_file.set(os.path.join(self.context.paths["output"], name))
+                else:
+                    self.output_file.set(os.path.splitext(f)[0] + "_TOIs.tsv")
 
     def save_as(self):
         f = filedialog.asksaveasfilename(defaultextension=".tsv", filetypes=[("TSV", "*.tsv")])
@@ -293,9 +300,8 @@ class TOIGeneratorView: # <--- NOME CAMBIATO
     def launch_wizard(self):
         try:
             from hermes_master_prof import ProfileWizard
-            # Creiamo una Toplevel figlia del nostro parent
             win = tk.Toplevel(self.parent)
             win.title("Wizard Profilo")
-            ProfileWizard(win) # Lancia il wizard nella nuova finestra
+            ProfileWizard(win)
         except ImportError:
             messagebox.showerror("Errore", "Impossibile trovare hermes_master_prof.py")

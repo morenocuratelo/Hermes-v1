@@ -19,7 +19,6 @@ KEYPOINTS_MAP = {
 class AOIProfileManager:
     def __init__(self, folder="profiles_aoi"):
         self.folder = folder
-        if not os.path.exists(folder): os.makedirs(folder)
         
     def create_default_profile(self):
         profile = {
@@ -40,29 +39,42 @@ class AOIProfileManager:
         return profile
 
     def load_profile(self, name):
-        with open(os.path.join(self.folder, name), 'r') as f: return json.load(f)
+        try:
+            with open(os.path.join(self.folder, name), 'r') as f: return json.load(f)
+        except Exception: return {}
 
     def save_profile(self, name, data):
         with open(os.path.join(self.folder, name), 'w') as f: json.dump(data, f, indent=4)
             
     def list_profiles(self):
-        if not os.path.exists(self.folder): self.create_default_profile()
+        if not os.path.exists(self.folder): return []
         return [f for f in os.listdir(self.folder) if f.endswith(".json")]
 
-class RegionView: # <--- NOME CAMBIATO
-    def __init__(self, parent, context): # <--- NUOVI ARGOMENTI
+class RegionView:
+    def __init__(self, parent, context):
         self.parent = parent
         self.context = context
         
-        # Rimosso self.root.title/geometry (gestiti dal main)
+        # --- FIX IMPORTANTE: Usa il path dal progetto ---
+        if self.context.paths["profiles_aoi"]:
+            profile_dir = self.context.paths["profiles_aoi"]
+        else:
+            profile_dir = "profiles_aoi_fallback"
+            if not os.path.exists(profile_dir): os.makedirs(profile_dir)
+            
+        self.pm = AOIProfileManager(folder=profile_dir)
         
-        self.pm = AOIProfileManager()
-        if not self.pm.list_profiles(): self.pm.create_default_profile()
+        # Crea default se vuoto
+        if not self.pm.list_profiles(): 
+            self.pm.create_default_profile()
         
         self.video_path = None
         self.pose_data = {} 
         self.identity_map = {} 
-        self.current_profile = self.pm.load_profile(self.pm.list_profiles()[0])
+        
+        # Carica il primo profilo disponibile
+        profs = self.pm.list_profiles()
+        self.current_profile = self.pm.load_profile(profs[0]) if profs else {}
         
         self.cap = None
         self.current_frame = 0
@@ -72,7 +84,6 @@ class RegionView: # <--- NOME CAMBIATO
         self._setup_ui()
 
         # --- AUTO-LOAD DAL CONTEXT ---
-        # Se i dati esistono già nel "cervello" condiviso, caricali subito
         if self.context.video_path:
             self.load_video_direct(self.context.video_path)
             
@@ -86,7 +97,7 @@ class RegionView: # <--- NOME CAMBIATO
         # Header visivo
         tk.Label(self.parent, text="3. Region Definition (AOI)", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 10), anchor="w")
 
-        main = tk.PanedWindow(self.parent, orient=tk.HORIZONTAL) # <--- CORRETTO: self.parent
+        main = tk.PanedWindow(self.parent, orient=tk.HORIZONTAL)
         main.pack(fill=tk.BOTH, expand=True)
         
         # SX: Video
@@ -125,8 +136,18 @@ class RegionView: # <--- NOME CAMBIATO
         if self.pm.list_profiles(): self.cb_profile.current(0)
         self.cb_profile.bind("<<ComboboxSelected>>", self.on_profile_change)
         
-        # --- NUOVO: Bottone Wizard ---
         tk.Button(f_prof, text="✨ Nuovo (Wizard)", command=self.open_profile_wizard, bg="#e1f5fe").pack(side=tk.LEFT, padx=5)
+        
+        self.notebook = ttk.Notebook(right)
+        self.notebook.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        self.frame_target = tk.Frame(self.notebook)
+        self.notebook.add(self.frame_target, text="Regole Target")
+        self.frame_others = tk.Frame(self.notebook)
+        self.notebook.add(self.frame_others, text="Regole Altri")
+        
+        self.refresh_editors()
+        tk.Button(right, text="GENERA E ESPORTA CSV AOI", bg="#4CAF50", fg="white", font=("Bold", 12), height=2, command=self.export_data).pack(side=tk.BOTTOM, fill=tk.X, pady=20)
         # -----------------------------
         
         self.notebook = ttk.Notebook(right)
@@ -357,10 +378,10 @@ class RegionView: # <--- NOME CAMBIATO
         f = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.avi")])
         if f: self.load_video_direct(f)
 
-    def load_video_direct(self, path): # Logica pura
+    def load_video_direct(self, path): 
         if not os.path.exists(path): return
         self.video_path = path
-        self.context.video_path = path # <--- AGGIORNA CONTEXT
+        self.context.video_path = path
         self.cap = cv2.VideoCapture(path)
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.slider.config(to=self.total_frames-1)

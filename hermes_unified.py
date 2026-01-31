@@ -1,5 +1,6 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
+import os
 import sys
 
 # Importa il contesto
@@ -30,17 +31,75 @@ except ImportError as e:
     print("Controlla che tutti i file (hermes_region.py, hermes_eye.py, ecc.) siano salvati con le nuove classi.")
     sys.exit(1)
 
+class ProjectWizard:
+    def __init__(self, root, context, on_complete):
+        self.root = root
+        self.context = context
+        self.on_complete = on_complete
+        
+        self.win = tk.Toplevel(root)
+        self.win.title("Hermes - Setup Progetto")
+        self.win.geometry("500x400")
+        self.win.protocol("WM_DELETE_WINDOW", sys.exit) # Se chiudi, esci dall'app
+        
+        tk.Label(self.win, text="Benvenuto in HERMES", font=("Segoe UI", 20, "bold")).pack(pady=20)
+        tk.Label(self.win, text="Per iniziare, seleziona una cartella di lavoro.\nTutti i file (video, output, profili) saranno salvati lì.", 
+                 justify="center").pack(pady=10)
+        
+        tk.Button(self.win, text="📂 Apri / Crea Cartella Progetto", bg="#007ACC", fg="white", font=("Bold", 12),
+                  height=2, command=self.select_folder).pack(fill=tk.X, padx=50, pady=20)
+        
+        self.lbl_path = tk.Label(self.win, text="Nessuna cartella selezionata", fg="gray")
+        self.lbl_path.pack()
+
+    def select_folder(self):
+        path = filedialog.askdirectory(title="Seleziona Cartella Progetto")
+        if path:
+            self.lbl_path.config(text=path, fg="black")
+            # Inizializza struttura
+            self.context.initialize_project(path)
+            
+            # Chiedi se importare file
+            if messagebox.askyesno("Importazione Rapida", "Vuoi importare i file sorgente (Video, Tobii, Matlab) ora?"):
+                self.run_import_wizard()
+            
+            self.win.destroy()
+            self.on_complete() # Avvia l'app principale
+
+    def run_import_wizard(self):
+        # Import Video
+        v = filedialog.askopenfilename(title="Seleziona VIDEO", filetypes=[("Video", "*.mp4 *.avi")])
+        if v: 
+            dest = self.context.import_file(v)
+            self.context.update_video(dest)
+        
+        # Import Matlab
+        m = filedialog.askopenfilename(title="Seleziona MATLAB/CSV", filetypes=[("Data", "*.mat *.csv")])
+        if m: self.context.import_file(m)
+
+        # Import Tobii JSON
+        t = filedialog.askopenfilename(title="Seleziona TOBII JSON", filetypes=[("JSON", "*.json")])
+        if t: self.context.import_file(t)
+        
+        messagebox.showinfo("Fatto", "File copiati nella cartella 'Input'.")
+
+
 class HermesUnifiedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("H.E.R.M.E.S. Integrated | Lab Modigliani")
-        self.root.geometry("1600x900")
+        self.root.withdraw() # Nascondi la finestra principale all'inizio
         
-        # Inizializza il cervello condiviso
         self.context = AppContext()
         
-        self._setup_layout()
+        # Lancia il Wizard
+        ProjectWizard(self.root, self.context, self.start_main_ui)
         
+    def start_main_ui(self):
+        self.root.deiconify() # Mostra finestra principale
+        self.root.title(f"H.E.R.M.E.S. | Progetto: {os.path.basename(self.context.project_path or '')}")
+        self.root.geometry("1600x900")
+        self._setup_layout()
+
     def _setup_layout(self):
         # A. Sidebar (Menu Laterale)
         sidebar = tk.Frame(self.root, width=220, bg="#2c3e50")
@@ -98,6 +157,8 @@ class HermesUnifiedApp:
         ViewClass(container, self.context)
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     root = tk.Tk()
     app = HermesUnifiedApp(root)
     root.mainloop()
