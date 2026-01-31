@@ -8,11 +8,12 @@ import random
 import math
 from PIL import Image, ImageTk
 
-class IdentityMapperV7:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Identity Mapper v7.1 (Custom Params) - Lab Modigliani")
-        self.root.geometry("1600x950")
+class IdentityView:  # <--- CAMBIATO NOME
+    def __init__(self, parent, context): # <--- NUOVI ARGOMENTI
+        self.parent = parent
+        self.context = context
+        
+        # Rimuovi self.root.title e geometry, non servono più
         
         # DATI
         self.video_path = None
@@ -23,33 +24,41 @@ class IdentityMapperV7:
         self.tracks = {} 
         self.id_lineage = {} 
         
-        # --- PARAMETRI CONFIGURABILI (Default da immagine) ---
-        # Unsupervised Auto-Stitching
-        self.param_lookahead = 15      # Window size (tracks)
-        self.param_time_gap = 2.0      # Seconds (occlusion tolerance)
-        self.param_stitch_dist = 150   # Pixels (centroid distance)
-        
-        # Supervised Noise Absorption
-        self.param_noise_dist = 100    # Pixels (tighter precision)
-        # -----------------------------------------------------
+        # --- PARAMETRI CONFIGURABILI (Invariati) ---
+        self.param_lookahead = 15      
+        self.param_time_gap = 2.0      
+        self.param_stitch_dist = 150   
+        self.param_noise_dist = 100    
+        # -------------------------------------------
 
-        # CAST
-        self.cast = {
-            "Target": {"color": (0, 255, 0)},       
-            "Confederate_1": {"color": (0, 255, 255)}, 
-            "Confederate_2": {"color": (0, 165, 255)}  
-        }
-        
+        # CAST (Recupera dal CONTEXT se esiste, altrimenti usa default)
+        if self.context.cast:
+            self.cast = self.context.cast
+        else:
+            self.cast = {
+                "Target": {"color": (0, 255, 0)},       
+                "Confederate_1": {"color": (0, 255, 255)}, 
+                "Confederate_2": {"color": (0, 165, 255)}  
+            }
+            self.context.cast = self.cast # Salva nel context per il futuro
+
         self.hide_short_var = tk.BooleanVar(value=True)
-        
         self.current_frame = 0
         self.total_frames = 0
         self.is_playing = False
 
         self._setup_ui()
+        
+        # AUTO-LOAD: Se Human ha finito, carica i dati automaticamente
+        if self.context.video_path and self.context.pose_data_path:
+            self.load_data_direct(self.context.video_path, self.context.pose_data_path)
 
     def _setup_ui(self):
-        main = tk.PanedWindow(self.root, orient=tk.HORIZONTAL)
+        # Header visivo
+        tk.Label(self.parent, text="2. Identity Assignment", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 10), anchor="w")
+
+        # Usa self.parent invece di self.root
+        main = tk.PanedWindow(self.parent, orient=tk.HORIZONTAL)
         main.pack(fill=tk.BOTH, expand=True)
 
         # 1. VIDEO (SX)
@@ -65,7 +74,7 @@ class IdentityMapperV7:
         
         btns = tk.Frame(ctrl)
         btns.pack(pady=5)
-        tk.Button(btns, text="📂 Carica Dati", command=self.load_data).pack(side=tk.LEFT, padx=5)
+        tk.Button(btns, text="📂 Carica Dati", command=self.browse_data).pack(side=tk.LEFT, padx=5)
         tk.Button(btns, text="⏯ Play/Pausa", command=self.toggle_play).pack(side=tk.LEFT, padx=5)
         tk.Button(btns, text="💾 SALVA MAPPATURA", bg="#4CAF50", fg="white", font=("bold"), command=self.save_mapping).pack(side=tk.LEFT, padx=20)
 
@@ -133,13 +142,13 @@ class IdentityMapperV7:
         self.tree.bind("<Button-3>", self.show_context_menu)
         self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
         
-        self.context_menu = tk.Menu(self.root, tearoff=0)
+        self.context_menu = tk.Menu(self.parent, tearoff=0)
         self.refresh_cast_list()
 
     # --- NUOVA FEATURE: DIALOG PARAMETRI ---
     def open_settings_dialog(self):
         """Apre una finestra popup per modificare i parametri hardcoded."""
-        win = tk.Toplevel(self.root)
+        win = tk.Toplevel(self.parent)
         win.title("Impostazioni Algoritmi")
         win.geometry("350x250")
         
@@ -360,19 +369,31 @@ class IdentityMapperV7:
             b,g,r = self.cast[n]['color']
             self.tree.tag_configure(n, background='#{:02x}{:02x}{:02x}'.format(min(r+180,255), min(g+180,255), min(b+180,255)))
 
-    def load_data(self):
-        v = filedialog.askopenfilename(); 
+    def browse_data(self):
+        # Sostituisce il vecchio load_data collegato al bottone
+        v = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.avi *.mov")]) 
         if not v: return
-        j = filedialog.askopenfilename()
+        j = filedialog.askopenfilename(filetypes=[("Pose JSON", "*.json.gz")])
         if not j: return
-        self.video_path = v; self.json_path = j
-        self.cap = cv2.VideoCapture(v)
+        self.load_data_direct(v, j)
+
+    def load_data_direct(self, video_path, json_path):
+        self.video_path = video_path
+        self.json_path = json_path
+        
+        # AGGIORNA IL CONTEXT
+        self.context.video_path = video_path
+        self.context.pose_data_path = json_path
+
+        self.cap = cv2.VideoCapture(self.video_path)
         self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.slider.config(to=self.total_frames-1)
+        
         self.tracks = {}; self.id_lineage = {}
+
         try:
-            with gzip.open(j, 'rt', encoding='utf-8') as f:
+            with gzip.open(json_path, 'rt', encoding='utf-8') as f:
                 for line in f:
                     d = json.loads(line)
                     idx = d['f_idx']
@@ -401,6 +422,7 @@ class IdentityMapperV7:
                     count += 1
         out = self.json_path.replace(".json.gz", "_identity.json")
         with open(out, 'w') as f: json.dump(out_map, f, indent=4)
+        self.context.identity_path = out
         messagebox.showinfo("Fatto", f"Mappati {count} ID originali.")
 
     def refresh_cast_list(self):
@@ -464,7 +486,7 @@ class IdentityMapperV7:
         if self.is_playing and self.cap:
             self.current_frame += 1
             if self.current_frame >= self.total_frames: self.is_playing=False
-            self.slider.set(self.current_frame); self.show_frame(); self.root.after(30, self.play_loop)
+            self.slider.set(self.current_frame); self.show_frame(); self.parent.after(30, self.play_loop)
             
     def show_frame(self):
         if not self.cap: return
@@ -489,7 +511,3 @@ class IdentityMapperV7:
         self.tk_img = ImageTk.PhotoImage(image=img)
         self.lbl_video.config(image=self.tk_img)
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    IdentityMapperV7(root)
-    root.mainloop()

@@ -4,6 +4,7 @@ import json
 import pandas as pd
 import os
 from datetime import datetime
+import scipy.io as sio
 
 # --- GESTIONE PROFILI ---
 class ProfileManager:
@@ -26,6 +27,9 @@ class TOIGenerator:
         """Converte stringhe 'HH:MM:SS.mmm' in secondi totali."""
         try:
             if pd.isna(time_str): return None
+            # If data comes from .mat, it might already be a float/int
+            if isinstance(time_str, (float, int)):
+                return float(time_str)
             time_str = str(time_str).strip()
             formats = ["%H:%M:%S.%f", "%H:%M:%S"]
             dt = None
@@ -41,7 +45,48 @@ class TOIGenerator:
             return None
 
     @staticmethod
-    def process(csv_path, json_path, profile, output_path):
+    def _load_matlab_file(path):
+        """
+        Loads data from .csv or .mat.
+        For .mat, extracts the first variable that is not an internal header.
+        """
+        ext = os.path.splitext(path)[1].lower()
+        
+        if ext == '.csv':
+            return pd.read_csv(path)
+        
+        elif ext == '.mat':
+            try:
+                mat_contents = sio.loadmat(path)
+                # Filter out internal keys starting with '__' (e.g., __header__, __version__)
+                valid_keys = [k for k in mat_contents.keys() if not k.startswith('__')]
+                
+                if not valid_keys:
+                    raise ValueError("The .mat file contains no variables.")
+                
+                # Heuristic: Take the first variable found. 
+                # Ideally, the variable name should be consistent (e.g., 'results'), 
+                # but we take the first valid one to be flexible.
+                data_var = mat_contents[valid_keys[0]]
+                
+                # Convert to DataFrame
+                # Case A: It's already a structured array/matrix compatible with DataFrame
+                try:
+                    df = pd.DataFrame(data_var)
+                    return df
+                except Exception:
+                    # Case B: It might be a Matlab Struct (complex handling often needed)
+                    # This flattens simple structs
+                    return pd.DataFrame(data_var[0]) 
+                    
+            except Exception as e:
+                raise ValueError(f"Failed to parse .mat file: {e}")
+        
+        else:
+            raise ValueError(f"Unsupported format: {ext}")
+
+    @staticmethod
+    def process(matlab_path, json_path, profile, output_path):
         # 1. Carica Evento Tobii
         try:
             with open(json_path, 'r') as f:
@@ -66,11 +111,13 @@ class TOIGenerator:
         except Exception as e:
             raise ValueError(f"Errore Tobii JSON: {e}")
 
-        # 2. Carica CSV Matlab
+        # 2. Load Matlab Data (CSV or MAT) <--- MODIFIED SECTION
         try:
-            df = pd.read_csv(csv_path)
+            df = TOIGenerator._load_matlab_file(matlab_path)
+            # Ensure column names are stripped of whitespace if loaded from loose CSVs
+            df.columns = df.columns.astype(str).str.strip()
         except Exception as e:
-            raise ValueError(f"Errore CSV Matlab: {e}")
+            raise ValueError(f"Matlab Data Load Error: {e}")
 
         # 3. Estrai configurazione Profilo
         struct = profile.get('csv_structure', {})
@@ -162,21 +209,24 @@ class TOIGenerator:
         out_df.to_csv(output_path, index=False, sep='\t')
         return len(toi_rows)
 
-# --- GUI (Standard) ---
-class App:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("TOI Builder V4 (Full Sync Control)")
-        self.root.geometry("600x600")
+class TOIGeneratorView: # <--- NOME CAMBIATO
+    def __init__(self, parent, context=None): # <--- ACCETTA CONTEXT
+        self.parent = parent
+        self.context = context
+        
         self.pm = ProfileManager()
         self.tobii_file = tk.StringVar()
         self.matlab_file = tk.StringVar()
         self.output_file = tk.StringVar()
         self.selected_profile = tk.StringVar()
+        
         self._build_ui()
 
     def _build_ui(self):
-        main = tk.Frame(self.root, padx=20, pady=20)
+        # Header visivo (opzionale ma consigliato per coerenza)
+        tk.Label(self.parent, text="4. TOI Builder (Sync & Cut)", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 10), anchor="w")
+
+        main = tk.Frame(self.parent, padx=20, pady=20, bg="white") # <--- CORRETTO: self.parent
         main.pack(fill=tk.BOTH, expand=True)
         
         # Header
@@ -189,12 +239,15 @@ class App:
         self.cb.pack(fill=tk.X)
         self.refresh_profiles()
         ttk.Button(lf1, text="Aggiorna Lista", command=self.refresh_profiles).pack(pady=5)
+        # Nuovo bottone per lanciare il Wizard (importiamo dinamicamente per evitare loop)
+        ttk.Button(lf1, text="➕ Crea Nuovo Profilo (Wizard)", command=self.launch_wizard).pack(pady=5)
 
         # 2. Input
         lf2 = tk.LabelFrame(main, text="2. Dati Input", padx=10, pady=10)
         lf2.pack(fill=tk.X, pady=10)
         self._add_picker(lf2, "Eventi Tobii (.json):", self.tobii_file, "*.json", 0)
-        self._add_picker(lf2, "Results Matlab (.csv):", self.matlab_file, "*.csv", 2)
+        # VERSIONE CORRETTA
+        self._add_picker(lf2, "Results Matlab (.csv, .mat):", self.matlab_file, "*.csv *.mat", 2)
 
         # 3. Output
         lf3 = tk.LabelFrame(main, text="3. Output", padx=10, pady=10)
@@ -231,11 +284,18 @@ class App:
         try:
             prof = self.pm.load_profile(self.selected_profile.get())
             n = TOIGenerator.process(self.matlab_file.get(), self.tobii_file.get(), prof, self.output_file.get())
+            if self.context:
+                self.context.toi_path = self.output_file.get()
             messagebox.showinfo("Successo", f"Generati {n} TOI.")
         except Exception as e:
             messagebox.showerror("Errore", str(e))
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    App(root)
-    root.mainloop()
+    
+    def launch_wizard(self):
+        try:
+            from hermes_master_prof import ProfileWizard
+            # Creiamo una Toplevel figlia del nostro parent
+            win = tk.Toplevel(self.parent)
+            win.title("Wizard Profilo")
+            ProfileWizard(win) # Lancia il wizard nella nuova finestra
+        except ImportError:
+            messagebox.showerror("Errore", "Impossibile trovare hermes_master_prof.py")

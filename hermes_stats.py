@@ -4,23 +4,36 @@ import pandas as pd
 import numpy as np
 import os
 
-class GazeAnalyzer:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Gaze Data Analyzer - Lab Modigliani")
-        self.root.geometry("700x550")
+class GazeStatsView: # <--- NOME CAMBIATO
+    def __init__(self, parent, context): # <--- NUOVI ARGOMENTI
+        self.parent = parent
+        self.context = context
         
         # Variabili File
         self.mapped_csv_path = tk.StringVar()
         self.toi_tsv_path = tk.StringVar()
         
         # Parametri
-        self.gaze_freq = tk.DoubleVar(value=50.0) # Frequenza Tobii Glasses (solitamente 50Hz o 100Hz)
+        self.gaze_freq = tk.DoubleVar(value=50.0)
         
         self._build_ui()
+        
+        # --- AUTO-LOAD DAL CONTEXT ---
+        # 1. Cerca il file MAPPED (Output del Tab 5)
+        if hasattr(self.context, 'mapped_csv_path') and self.context.mapped_csv_path:
+            self.mapped_csv_path.set(self.context.mapped_csv_path)
+            
+        # 2. Cerca il file TOI (Output del Tab 4)
+        # Nota: Se hai aggiornato il Tab 4 per salvare nel context, lo troverà qui.
+        # Altrimenti l'utente lo caricherà a mano.
+        if hasattr(self.context, 'toi_path') and self.context.toi_path:
+            self.toi_tsv_path.set(self.context.toi_path)
 
     def _build_ui(self):
-        main = tk.Frame(self.root, padx=20, pady=20)
+        # Header visivo
+        tk.Label(self.parent, text="6. Statistics & Reporting", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 10), anchor="w")
+
+        main = tk.Frame(self.parent, padx=20, pady=20, bg="white") # <--- CORRETTO: self.parent
         main.pack(fill=tk.BOTH, expand=True)
         
         tk.Label(main, text="Gaze Analyzer: From Raw to Stats", font=("Segoe UI", 16, "bold")).pack(pady=(0,20))
@@ -63,7 +76,7 @@ class GazeAnalyzer:
             
         try:
             self.lbl_status.config(text="Caricamento dati...")
-            self.root.update()
+            self.parent.update()
             
             # 1. Carica Dati
             # Mapped Gaze
@@ -80,7 +93,7 @@ class GazeAnalyzer:
             results = []
             
             self.lbl_status.config(text=f"Analisi di {len(df_toi)} fasi...")
-            self.root.update()
+            self.parent.update()
             
             # 2. Loop sulle Fasi (TOI)
             for idx, row in df_toi.iterrows():
@@ -150,8 +163,3 @@ class GazeAnalyzer:
         except Exception as e:
             messagebox.showerror("Errore Analisi", str(e))
             self.lbl_status.config(text="Errore.")
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    GazeAnalyzer(root)
-    root.mainloop()

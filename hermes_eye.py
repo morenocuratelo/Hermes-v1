@@ -6,26 +6,37 @@ import gzip
 import os
 import math
 
-class GazeMapper:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Gaze to AOI Mapper (Fixed) - Lab Modigliani")
-        self.root.geometry("800x650")
+class GazeView: # <--- NOME CAMBIATO
+    def __init__(self, parent, context): # <--- ACCETTA CONTEXT
+        self.parent = parent
+        self.context = context
         
         # Variabili
         self.aoi_path = tk.StringVar()
         self.gaze_path = tk.StringVar()
         
-        # Parametri Video (Fondamentali per il mapping)
+        # Parametri Video
         self.video_res_w = tk.IntVar(value=1920)
         self.video_res_h = tk.IntVar(value=1080)
         self.fps = tk.DoubleVar(value=25.0) 
         self.sync_offset = tk.DoubleVar(value=0.0) 
         
         self._build_ui()
+        
+        # --- AUTO-LOAD DAL CONTEXT ---
+        # 1. Cerca il file AOI generato dal modulo Region
+        if self.context.aoi_csv_path and os.path.exists(self.context.aoi_csv_path):
+            self.aoi_path.set(self.context.aoi_csv_path)
+            
+        # 2. Cerca file Gaze (se impostato precedentemente o in setup futuri)
+        if hasattr(self.context, 'gaze_data_path') and self.context.gaze_data_path:
+             self.gaze_path.set(self.context.gaze_data_path)
 
     def _build_ui(self):
-        main = tk.Frame(self.root, padx=20, pady=20)
+        # Header visivo
+        tk.Label(self.parent, text="5. Eye Mapping (Gaze -> AOI)", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 10), anchor="w")
+
+        main = tk.Frame(self.parent, padx=20, pady=20, bg="white") # <--- CORRETTO: self.parent
         main.pack(fill=tk.BOTH, expand=True)
         
         tk.Label(main, text="Gaze Mapper: Eye Tracking + AOI", font=("Segoe UI", 16, "bold")).pack(pady=(0,20))
@@ -74,7 +85,11 @@ class GazeMapper:
 
     def browse(self, var, ft):
         path = filedialog.askopenfilename(filetypes=[("File", ft)])
-        if path: var.set(path)
+        if path: 
+            var.set(path)
+            # Se è il file Gaze, salvalo nel context per il futuro
+            if var == self.gaze_path:
+                self.context.gaze_data_path = path
 
     def run_process(self):
         if not self.aoi_path.get() or not self.gaze_path.get():
@@ -82,7 +97,7 @@ class GazeMapper:
             return
             
         self.lbl_status.config(text="Caricamento AOI in memoria...")
-        self.root.update()
+        self.parent.update()
         
         try:
             # 1. Carica AOI
@@ -102,7 +117,7 @@ class GazeMapper:
             
             self.lbl_status.config(text=f"AOI Indicizzate ({len(aoi_lookup)} frame). Elaborazione Gaze...")
             self.progress.start(10)
-            self.root.update()
+            self.parent.update()
             
             # Parametri
             W, H = self.video_res_w.get(), self.video_res_h.get()
@@ -176,6 +191,7 @@ class GazeMapper:
             if out_path == self.gaze_path.get(): out_path += "_mapped.csv"
             
             df_out = pd.DataFrame(output_rows)
+            self.context.mapped_csv_path = out_path
             df_out.to_csv(out_path, index=False)
             
             messagebox.showinfo("Successo", f"Mapping completato!\nFile salvato in:\n{out_path}\n\nRighe totali: {len(df_out)}")
@@ -185,8 +201,3 @@ class GazeMapper:
             self.progress.stop()
             messagebox.showerror("Errore Critico", str(e))
             self.lbl_status.config(text="Errore.")
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    GazeMapper(root)
-    root.mainloop()

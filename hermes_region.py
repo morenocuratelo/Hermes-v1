@@ -49,11 +49,12 @@ class AOIProfileManager:
         if not os.path.exists(self.folder): self.create_default_profile()
         return [f for f in os.listdir(self.folder) if f.endswith(".json")]
 
-class AOIBuilderDebug:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("AOI Builder DIAGNOSTICA - Lab Modigliani")
-        self.root.geometry("1600x900")
+class RegionView: # <--- NOME CAMBIATO
+    def __init__(self, parent, context): # <--- NUOVI ARGOMENTI
+        self.parent = parent
+        self.context = context
+        
+        # Rimosso self.root.title/geometry (gestiti dal main)
         
         self.pm = AOIProfileManager()
         if not self.pm.list_profiles(): self.pm.create_default_profile()
@@ -70,8 +71,22 @@ class AOIBuilderDebug:
         
         self._setup_ui()
 
+        # --- AUTO-LOAD DAL CONTEXT ---
+        # Se i dati esistono già nel "cervello" condiviso, caricali subito
+        if self.context.video_path:
+            self.load_video_direct(self.context.video_path)
+            
+        if self.context.pose_data_path:
+            self.load_pose_direct(self.context.pose_data_path)
+            
+        if self.context.identity_path:
+            self.load_identity_direct(self.context.identity_path)
+
     def _setup_ui(self):
-        main = tk.PanedWindow(self.root, orient=tk.HORIZONTAL)
+        # Header visivo
+        tk.Label(self.parent, text="3. Region Definition (AOI)", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 10), anchor="w")
+
+        main = tk.PanedWindow(self.parent, orient=tk.HORIZONTAL) # <--- CORRETTO: self.parent
         main.pack(fill=tk.BOTH, expand=True)
         
         # SX: Video
@@ -87,9 +102,9 @@ class AOIBuilderDebug:
         
         btns = tk.Frame(ctrl)
         btns.pack(pady=5)
-        tk.Button(btns, text="1. Video", command=self.load_video).pack(side=tk.LEFT, padx=5)
-        tk.Button(btns, text="2. Pose (.gz)", command=self.load_pose).pack(side=tk.LEFT, padx=5)
-        tk.Button(btns, text="3. Identità (.json)", command=self.load_identity).pack(side=tk.LEFT, padx=5)
+        tk.Button(btns, text="1. Video", command=self.browse_video).pack(side=tk.LEFT, padx=5)
+        tk.Button(btns, text="2. Pose (.gz)", command=self.browse_pose).pack(side=tk.LEFT, padx=5)
+        tk.Button(btns, text="3. Identità (.json)", command=self.browse_identity).pack(side=tk.LEFT, padx=5)
         tk.Button(btns, text="⏯ Play", command=self.toggle_play).pack(side=tk.LEFT, padx=20)
         
         # TASTO DIAGNOSTICA
@@ -126,7 +141,7 @@ class AOIBuilderDebug:
         tk.Button(right, text="GENERA E ESPORTA CSV AOI", bg="#4CAF50", fg="white", font=("Bold", 12), height=2, command=self.export_data).pack(side=tk.BOTTOM, fill=tk.X, pady=20)
 
     def open_profile_wizard(self):
-        win = tk.Toplevel(self.root)
+        win = tk.Toplevel(self.parent)
         win.title("Wizard Profilo Avanzato")
         win.geometry("450x650")
         
@@ -338,22 +353,30 @@ class AOIBuilderDebug:
         print("="*40 + "\n")
 
     # --- DATA LOADING ---
-    def load_video(self):
-        f = filedialog.askopenfilename()
-        if f:
-            self.video_path = f
-            self.cap = cv2.VideoCapture(f)
-            self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            self.slider.config(to=self.total_frames-1)
-            self.show_frame()
+    def browse_video(self): # Collegato al bottone
+        f = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.avi")])
+        if f: self.load_video_direct(f)
 
-    def load_pose(self):
-        f = filedialog.askopenfilename()
-        if not f: return
+    def load_video_direct(self, path): # Logica pura
+        if not os.path.exists(path): return
+        self.video_path = path
+        self.context.video_path = path # <--- AGGIORNA CONTEXT
+        self.cap = cv2.VideoCapture(path)
+        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.slider.config(to=self.total_frames-1)
+        self.show_frame()
+
+    def browse_pose(self):
+        f = filedialog.askopenfilename(filetypes=[("Pose JSON", "*.json.gz")])
+        if f: self.load_pose_direct(f)
+
+    def load_pose_direct(self, path):
+        if not os.path.exists(path): return
+        self.context.pose_data_path = path # <--- AGGIORNA CONTEXT
         self.pose_data = {}
-        print("--- Caricamento Pose ---")
+        print(f"--- Caricamento Pose: {os.path.basename(path)} ---")
         try:
-            with gzip.open(f, 'rt', encoding='utf-8') as file:
+            with gzip.open(path, 'rt', encoding='utf-8') as file:
                 for line in file:
                     d = json.loads(line)
                     f_idx = d['f_idx']
@@ -375,12 +398,16 @@ class AOIBuilderDebug:
         except Exception as e: messagebox.showerror("Err", str(e))
         self.show_frame()
 
-    def load_identity(self):
-        f = filedialog.askopenfilename()
-        if f:
-            with open(f, 'r') as file: self.identity_map = json.load(file)
-            print(f"Identità caricate: {len(self.identity_map)} ID.")
-            self.show_frame()
+    def browse_identity(self):
+        f = filedialog.askopenfilename(filetypes=[("Identity", "*.json")])
+        if f: self.load_identity_direct(f)
+
+    def load_identity_direct(self, path):
+        if not os.path.exists(path): return
+        self.context.identity_path = path # <--- AGGIORNA CONTEXT
+        with open(path, 'r') as file: self.identity_map = json.load(file)
+        print(f"Identità caricate: {len(self.identity_map)} ID.")
+        self.show_frame()
 
     def calculate_box(self, kps_data, rule):
         indices = rule['kps']
@@ -448,11 +475,12 @@ class AOIBuilderDebug:
         if self.is_playing and self.cap:
             self.current_frame += 1
             if self.current_frame >= self.total_frames: self.is_playing=False
-            self.slider.set(self.current_frame); self.show_frame(); self.root.after(30, self.play_loop)
+            self.slider.set(self.current_frame); self.show_frame(); self.parent.after(30, self.play_loop)
     def export_data(self):
         if not self.pose_data: return
         out = filedialog.asksaveasfilename(defaultextension=".csv")
         if not out: return
+        self.context.export_path = out # <--- AGGIORNA CONTEXT
         rows = []
         for f, d in self.pose_data.items():
             for tid, kps in d.items():
@@ -463,9 +491,6 @@ class AOIBuilderDebug:
                     b = self.calculate_box(kps, r)
                     if b: rows.append({"Frame":f, "ID":tid, "Role":role, "AOI":r['name'], "x1":b[0], "y1":b[1], "x2":b[2], "y2":b[3]})
         pd.DataFrame(rows).to_csv(out, index=False)
+        self.context.aoi_csv_path = out
         messagebox.showinfo("OK", "Export completo.")
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    AOIBuilderDebug(root)
-    root.mainloop()
