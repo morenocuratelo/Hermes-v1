@@ -23,12 +23,14 @@ class AppContext:
         
         # 3. Shared Data References
         self.video_path = None
+        self.gaze_data_path = None      # .gz (Tobii)
         self.pose_data_path = None      # .json.gz
         self.identity_map_path = None   # .json
         self.toi_path = None            # .tsv
         self.mapped_csv_path = None     # .csv
         self.aoi_csv_path = None        # .csv
         self.export_path = None         # Ultimo export CSV AOI
+        self.yolo_model_path = None     # .pt
         
         # Mapping Ruoli/Colori condiviso
         self.cast = {} 
@@ -60,6 +62,9 @@ class AppContext:
         # Crea Profili Default (Se vuoti)
         self._create_default_toi_profile()
         # self._create_default_aoi_profile() # Opzionale, gestito da RegionView se manca
+        
+        # Scansiona file esistenti
+        self._scan_existing_files()
         
         print(f"PROGETTO INIZIALIZZATO: {folder_path}")
 
@@ -95,3 +100,55 @@ class AppContext:
             }
             with open(os.path.join(self.paths["profiles_toi"], "Default_TOI.json"), 'w') as f:
                 json.dump(default_prof, f, indent=4)
+
+    def _scan_existing_files(self):
+        """Scansiona ricorsivamente tutte le sottocartelle per popolare il contesto con file esistenti."""
+        if not self.project_path or not os.path.exists(self.project_path):
+            return
+
+        print(f"CONTEXT: Scansione ricorsiva in {self.project_path}...")
+
+        for root, _, files in os.walk(self.project_path):
+            for f in files:
+                f_path = os.path.join(root, f)
+                lower = f.lower()
+                
+                # 1. Video
+                if lower.endswith(('.mp4', '.avi', '.mov')):
+                    self.video_path = f_path
+                    print(f"CONTEXT: Video rilevato -> {f}")
+                
+                # 2. Pose Data (YOLO)
+                elif lower.endswith('_yolo.json.gz'):
+                    self.pose_data_path = f_path
+                    print(f"CONTEXT: Pose Data rilevato -> {f}")
+
+                # 3. Gaze Data (Tobii) - .gz ma non yolo
+                elif lower.endswith('.gz') and not lower.endswith('_yolo.json.gz'):
+                    self.gaze_data_path = f_path
+                    print(f"CONTEXT: Gaze Data rilevato -> {f}")
+
+                # 4. Identity Map
+                elif lower.endswith('_identity.json'):
+                    self.identity_map_path = f_path
+                    print(f"CONTEXT: Identity Map rilevata -> {f}")
+
+                # 5. TOI
+                elif lower.endswith('.tsv'):
+                    self.toi_path = f_path
+                    print(f"CONTEXT: TOI rilevati -> {f}")
+
+                # 6. Mapped CSV
+                elif 'mapped' in lower and lower.endswith('.csv'):
+                    self.mapped_csv_path = f_path
+                    print(f"CONTEXT: Mapped CSV rilevato -> {f}")
+
+                # 7. AOI CSV
+                elif lower.endswith('.csv') and 'results' not in lower:
+                    self.aoi_csv_path = f_path
+                    print(f"CONTEXT: AOI CSV rilevato -> {f}")
+
+                # 8. YOLO Model
+                elif lower.endswith('.pt'):
+                    self.yolo_model_path = f_path
+                    print(f"CONTEXT: Modello YOLO rilevato -> {f}")

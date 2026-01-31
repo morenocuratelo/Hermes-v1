@@ -7,6 +7,7 @@ import gzip
 import os
 import threading
 import sys
+import requests # Usiamo requests per un download migliore
 from ultralytics import YOLO # type: ignore
 
 # --- REDIRECT PRINT TO GUI ---
@@ -37,7 +38,7 @@ class YoloView:
         # Variabili Locali
         self.video_path = tk.StringVar()
         self.output_path = tk.StringVar()
-        self.model_name = tk.StringVar(value="yolo11x-pose.pt") # Default V11
+        self.model_name = tk.StringVar(value="yolo26x-pose.pt") 
         self.is_running = False
         
         # --- SYNC CONTEXT (LETTURA) ---
@@ -67,11 +68,10 @@ class YoloView:
         lf_conf.pack(fill=tk.X, pady=5)
         
         tk.Label(lf_conf, text="Modello YOLO:", bg="white").pack(side=tk.LEFT)
-        # Includiamo sia v8 che v11
+        
+        # LISTA MODELLI
         models = [
-            "yolo11x-pose.pt", "yolo11l-pose.pt", "yolo11m-pose.pt", 
-            "yolo11s-pose.pt", "yolo11n-pose.pt",
-            "yolo8x-pose.pt", "yolo8l-pose.pt", "yolo8n-pose.pt"
+            "yolo26x-pose.pt", "yolo26l-pose.pt", "yolo26m-pose.pt", "yolo26s-pose.pt", "yolo26n-pose.pt",
         ]
         self.cb_model = ttk.Combobox(lf_conf, textvariable=self.model_name, values=models, state="readonly", width=25)
         self.cb_model.pack(side=tk.LEFT, padx=10)
@@ -108,13 +108,11 @@ class YoloView:
     def _suggest_output_name(self, video_path):
         if not video_path: return
         base = os.path.splitext(video_path)[0]
-        # Salva nella cartella Output del progetto se possibile
         if self.context.paths["output"] and os.path.exists(self.context.paths["output"]):
             filename = os.path.basename(base) + "_yolo.json.gz"
             suggested = os.path.join(self.context.paths["output"], filename)
         else:
             suggested = base + "_yolo.json.gz"
-            
         self.output_path.set(suggested)
         self.context.pose_data_path = suggested
 
@@ -142,6 +140,38 @@ class YoloView:
         t = threading.Thread(target=self.run_yolo_process)
         t.start()
 
+    # --- NUOVA FUNZIONE DI DOWNLOAD ---
+    def _download_model_manual(self, model_name, dest_path):
+        """Scarica manualmente il modello per evitare il flood della console e gestire meglio la rete."""
+        print(f"📥 Download modello in corso: {model_name}...")
+        
+        # URL ufficiali Ultralytics Assets
+        base_url = "https://github.com/ultralytics/assets/releases/download/v8.3.0/"
+        url = base_url + model_name
+        
+        try:
+            response = requests.get(url, stream=True, timeout=10)
+            response.raise_for_status()
+            total_size = int(response.headers.get('content-length', 0))
+            
+            with open(dest_path, 'wb') as f:
+                downloaded = 0
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        # Aggiorna progress bar UI (0-50% riservato al download)
+                        if total_size > 0:
+                            perc = int((downloaded / total_size) * 50)
+                            self.parent.after(0, lambda v=perc: self.progress.config(value=v))
+            
+            print("✅ Download completato.")
+            return True
+        except Exception as e:
+            print(f"❌ Errore download: {e}")
+            if os.path.exists(dest_path): os.remove(dest_path) # Rimuovi file corrotto
+            return False
+
     def run_yolo_process(self):
         video_file = self.video_path.get()
         out_file = self.output_path.get()
@@ -152,53 +182,38 @@ class YoloView:
             print(f"Video: {os.path.basename(video_file)}")
             print(f"Device: {self.context.device.upper()}")
             
-            # --- MODIFICA PATH MODELLO ---
-            # Cerca o scarica il modello nella cartella del progetto
+            # 1. GESTIONE MODELLO
             model_path = os.path.join(self.context.paths["models"], model_name)
-            print(f"Path Modello: {model_path}")
             
-            # Se il file non esiste, YOLO lo scaricherà nella Current Working Directory.
-            # Workaround: Cambiamo CWD o usiamo il path assoluto se YOLO lo supporta per il download
-            # Ultralytics V8+ scarica automaticamente se non trova il file.
-            # Se vogliamo forzare la cartella Models, possiamo passare il path assoluto.
-            # Se non esiste, lo scarichiamo noi o lasciamo fare a lui e poi lo spostiamo.
-            # Per semplicità qui passiamo il path: se YOLO non lo trova lì, potrebbe scaricarlo nella root.
-            # Soluzione robusta: passo il nome nudo se non esiste, poi lo sposto.
-            
-            if os.path.exists(model_path):
-                load_arg = model_path
+            if not os.path.exists(model_path):
+                print(f"Il modello {model_name} non è presente nella cartella Models.")
+                success = self._download_model_manual(model_name, model_path)
+                if not success:
+                    raise Exception("Impossibile scaricare il modello. Controlla internet o scaricalo manualmente.")
             else:
-                print("Modello non trovato nella cartella Models. YOLO lo scaricherà...")
-                load_arg = model_name # Scarica nella root
-                
-            model = YOLO(load_arg) 
-            
-            # Se è stato appena scaricato nella root, spostiamolo per ordine (Opzionale)
-            if load_arg == model_name and os.path.exists(model_name):
-                try:
-                    shutil.move(model_name, model_path)
-                    print(f"Modello spostato in: {model_path}")
-                    model = YOLO(model_path) # Ricarica dal path corretto
-                except Exception as e:
-                    print(f"Impossibile spostare il modello: {e}")
+                print(f"Modello trovato in: {model_path}")
+                self.progress.config(value=50) # Skip download progress
 
-            print("Modello caricato in memoria.")
+            # 2. CARICAMENTO
+            print("Caricamento pesi YOLO in memoria...")
+            model = YOLO(model_path) 
             
-            # Info Video
+            # 3. TRACKING
             cap = cv2.VideoCapture(video_file)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             cap.release()
             
-            self.parent.after(0, lambda: self.progress.configure(maximum=total_frames))
+            # Ricalibra progress bar per la fase di tracking (dal 50% al 100%)
+            self.parent.after(0, lambda: self.progress.configure(maximum=total_frames + (total_frames))) 
             
-            print("Avvio tracking (questo processo può richiedere tempo)...")
+            print("Avvio tracking video...")
             
             results = model.track(
                 source=video_file,
                 stream=True,
                 persist=True,
                 tracker="bytetrack.yaml",
-                verbose=False,
+                verbose=False, # <--- DISABILITA SPAM CONSOLE DI ULTRALYTICS
                 conf=0.5,
                 device=0 if self.context.device == "cuda" else "cpu"
             )
@@ -212,7 +227,11 @@ class YoloView:
                     f.write(json.dumps(frame_data) + "\n")
                     
                     if i % 10 == 0:
-                        self.parent.after(0, lambda v=i: self.progress.config(value=v))
+                        # Aggiorna progress bar (offset di partenza per considerare il download fatto)
+                        # Usiamo un valore fittizio alto per muovere la barra nella seconda metà
+                        current_val = total_frames + i 
+                        self.parent.after(0, lambda v=current_val: self.progress.config(value=v))
+                        
                         if i % 100 == 0:
                             print(f"Elaborato Frame: {i}/{total_frames}")
 

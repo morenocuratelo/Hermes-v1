@@ -1,0 +1,30 @@
+{
+    "name": "bw_ment",
+    "description": "",
+    "csv_structure": {
+        "condition_column": "Condition",
+        "sequence_columns": [
+            "partenza",
+            "stop",
+            "fine_face2face",
+            "end_trial"
+        ]
+    },
+    "phases_labels": [
+        "Phase_partenza",
+        "Phase_stop",
+        "Phase_fine_face2face"
+    ],
+    "fixed_phase_anchor_column": "auto",
+    "append_fixed_phases": [
+        {
+            "name": "ITI",
+            "duration": 10.0
+        }
+    ],
+    "sync_logic": {
+        "tobii_event_label": "Start",
+        "matlab_anchor_column": "baseline_end",
+        "seconds_offset": -60.0
+    }
+}

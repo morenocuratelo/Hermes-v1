@@ -411,19 +411,30 @@ class IdentityView:  # <--- CAMBIATO NOME
         self.refresh_tree(); self.show_frame()
 
     def save_mapping(self):
-        if not self.json_path: return
-        out_map = {}
-        count = 0
-        for oid, master in self.id_lineage.items():
-            if master in self.tracks:
-                role = self.tracks[master]['role']
-                if role in self.cast:
-                    out_map[str(oid)] = role
-                    count += 1
-        out = self.json_path.replace(".json.gz", "_identity.json")
-        with open(out, 'w') as f: json.dump(out_map, f, indent=4)
-        self.context.identity_path = out
-        messagebox.showinfo("Fatto", f"Mappati {count} ID originali.")
+        if not self.json_path:
+            return
+
+        # 1. Definisci il nome del file
+        base_name = os.path.basename(self.json_path).replace(".json.gz", "_identity.json")
+        
+        # 2. Determina il percorso (se esiste il context, usa la cartella output)
+        if self.context and self.context.paths.get("output"):
+            out = os.path.join(self.context.paths["output"], base_name)
+        else:
+            out = self.json_path.replace(".json.gz", "_identity.json")
+
+        # 3. Salvataggio fisico del file
+        mapping = {tid: d['role'] for tid, d in self.tracks.items() if d['role'] != 'None'}
+        with open(out, 'w') as f:
+            json.dump(mapping, f, indent=4)
+
+        # 4. Aggiorna il Context
+        if self.context:
+            self.context.identity_map_path = out
+            print(f"CONTEXT: Identity Map aggiornata -> {out}")
+
+        count = len(mapping)
+        messagebox.showinfo("Fatto", f"Mappati {count} ID.\nSalvato in: {out}")
 
     def refresh_cast_list(self):
         self.list_cast.delete(0, tk.END)
