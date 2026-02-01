@@ -325,12 +325,12 @@ class YoloView:
                     # result.keypoints: Coordinate scheletriche (Pose estimation)
                     
                     # Spostamento tensori da VRAM a RAM
-                    boxes = result.boxes.xywh.cpu().numpy() if result.boxes else np.array([])
-                    ids = result.boxes.id.cpu().numpy() if result.boxes and result.boxes.id is not None else np.array([])
-                    confs = result.boxes.conf.cpu().numpy() if result.boxes else np.array([])
+                    boxes = result.boxes.xywh.cpu().numpy() if result.boxes else np.array([])  # type: ignore
+                    ids = result.boxes.id.cpu().numpy() if result.boxes and result.boxes.id is not None else np.array([])  # type: ignore
+                    confs = result.boxes.conf.cpu().numpy() if result.boxes else np.array([])  # type: ignore
                     
                     # Keypoints: [N, 17, 3] -> (x, y, visibility)
-                    keypoints = result.keypoints.data.cpu().numpy() if result.keypoints else np.array([])
+                    keypoints = result.keypoints.data.cpu().numpy() if result.keypoints else np.array([])  # type: ignore
 
                     det_list = []
                     # Iterazione sulle detection del singolo frame

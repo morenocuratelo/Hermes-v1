@@ -5,6 +5,8 @@ import json
 import gzip
 import os
 import math
+import cv2
+from PIL import Image, ImageTk
 
 class GazeView: # <--- NOME CAMBIATO
     def __init__(self, parent, context): # <--- ACCETTA CONTEXT
@@ -69,6 +71,9 @@ class GazeView: # <--- NOME CAMBIATO
 
         # 3. Process
         tk.Button(main, text="ELABORA E MAPPA", bg="#007ACC", fg="white", font=("Bold", 12), height=2, command=self.run_process).pack(fill=tk.X, pady=20)
+        
+        # --- NUOVO BOTTONE PLAYER ---
+        tk.Button(main, text="📺 VISUALIZZA PLAYER RISULTATI", command=self.open_player).pack(fill=tk.X, pady=5)
         
         self.progress = ttk.Progressbar(main, orient=tk.HORIZONTAL, mode='indeterminate')
         self.progress.pack(fill=tk.X)
@@ -201,3 +206,160 @@ class GazeView: # <--- NOME CAMBIATO
             self.progress.stop()
             messagebox.showerror("Errore Critico", str(e))
             self.lbl_status.config(text="Errore.")
+
+    def open_player(self):
+        vid = self.context.video_path
+        csv = getattr(self.context, 'mapped_csv_path', None)
+        
+        # Fallback se il context non ha il csv ma il path è nella entry
+        if not csv and self.gaze_path.get():
+             candidate = self.gaze_path.get().replace(".gz", "_MAPPED.csv")
+             if os.path.exists(candidate):
+                 csv = candidate
+        
+        if not vid or not os.path.exists(vid):
+            messagebox.showerror("Errore", "Video non trovato nel contesto.\nCarica un video in Human o Entity prima.")
+            return
+            
+        if not csv or not os.path.exists(csv):
+            messagebox.showerror("Errore", "File Mapped CSV non trovato.\nEsegui prima il mapping.")
+            return
+            
+        GazeResultPlayer(self.parent, vid, csv)
+
+class GazeResultPlayer:
+    def __init__(self, parent, video_path, csv_path):
+        self.win = tk.Toplevel(parent)
+        self.win.title("Gaze Mapping Player")
+        self.win.geometry("1000x700")
+        
+        self.video_path = video_path
+        self.csv_path = csv_path
+        
+        self.cap = cv2.VideoCapture(video_path)
+        self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
+        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        # Load Data
+        try:
+            self.df = pd.read_csv(csv_path)
+            self.data_map = {}
+            for _, row in self.df.iterrows():
+                f_idx = int(row['Frame_Est'])
+                if f_idx not in self.data_map: self.data_map[f_idx] = []
+                self.data_map[f_idx].append(row)
+        except Exception as e:
+            messagebox.showerror("Errore CSV", str(e))
+            self.win.destroy()
+            return
+
+        self.is_playing = False
+        self.current_frame = 0
+        
+        self.lbl_video = tk.Label(self.win, bg="black")
+        self.lbl_video.pack(fill=tk.BOTH, expand=True)
+        
+        ctrl = tk.Frame(self.win, bg="#eee", pady=5)
+        ctrl.pack(fill=tk.X, side=tk.BOTTOM)
+        
+        self.slider = tk.Scale(ctrl, from_=0, to=self.total_frames-1, orient=tk.HORIZONTAL, command=self.on_seek, showvalue=False, bg="#eee", highlightthickness=0)
+        self.slider.pack(fill=tk.X, padx=10, pady=(0, 5))
+        
+        btn_frame = tk.Frame(ctrl, bg="#eee")
+        btn_frame.pack(pady=5)
+        
+        tk.Button(btn_frame, text="⏮ -10", command=lambda: self.step(-10), width=6).pack(side=tk.LEFT, padx=2)
+        tk.Button(btn_frame, text="⏴ -1", command=lambda: self.step(-1), width=6).pack(side=tk.LEFT, padx=2)
+        
+        self.btn_play = tk.Button(btn_frame, text="▶ Play", command=self.toggle_play, font=("Bold", 10), width=10, bg="#ddd")
+        self.btn_play.pack(side=tk.LEFT, padx=10)
+        
+        tk.Button(btn_frame, text="+1 ⏵", command=lambda: self.step(1), width=6).pack(side=tk.LEFT, padx=2)
+        tk.Button(btn_frame, text="+10 ⏭", command=lambda: self.step(10), width=6).pack(side=tk.LEFT, padx=2)
+        
+        self.lbl_info = tk.Label(ctrl, text="Ready", font=("Consolas", 10), bg="#eee")
+        self.lbl_info.pack(pady=2)
+
+        self.win.update_idletasks()
+        self.win.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.show_frame()
+
+    def on_close(self):
+        self.is_playing = False
+        if self.cap: self.cap.release()
+        self.win.destroy()
+
+    def toggle_play(self):
+        self.is_playing = not self.is_playing
+        if self.is_playing:
+            self.btn_play.config(text="⏸ Pause")
+            self.play_loop()
+        else:
+            self.btn_play.config(text="▶ Play")
+
+    def step(self, delta):
+        self.is_playing = False
+        self.btn_play.config(text="▶ Play")
+        new_frame = self.current_frame + delta
+        self.current_frame = max(0, min(new_frame, self.total_frames - 1))
+        self.slider.set(self.current_frame)
+        self.show_frame()
+
+    def play_loop(self):
+        if not self.is_playing: return
+        self.current_frame += 1
+        if self.current_frame >= self.total_frames:
+            self.is_playing = False
+            self.btn_play.config(text="▶ Play")
+            return
+        self.slider.set(self.current_frame)
+        self.show_frame()
+        self.win.after(int(1000/self.fps), self.play_loop)
+
+    def on_seek(self, val):
+        self.current_frame = int(val)
+        self.show_frame()
+
+    def show_frame(self):
+        if not self.cap: return
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
+        ret, frame = self.cap.read()
+        if not ret: return
+        
+        # --- LOGICA DISEGNO (Invariata) ---
+        if self.current_frame in self.data_map:
+            samples = self.data_map[self.current_frame]
+            hit_samples = [s for s in samples if s['Hit_Role'] != 'None' and pd.notna(s['Hit_Role'])]
+            best_sample = hit_samples[0] if hit_samples else samples[0]
+            gx, gy = int(best_sample['Gaze_X']), int(best_sample['Gaze_Y'])
+            role = best_sample['Hit_Role']
+            aoi = best_sample['Hit_AOI']
+            color = (0, 0, 255) if (role != 'None' and pd.notna(role)) else (0, 255, 255)
+            if role != 'None' and pd.notna(role):
+                cv2.putText(frame, f"HIT: {role} ({aoi})", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+            cv2.circle(frame, (gx, gy), 10, color, 2)
+            cv2.line(frame, (gx-15, gy), (gx+15, gy), color, 2)
+            cv2.line(frame, (gx, gy-15), (gx, gy+15), color, 2)
+            self.lbl_info.config(text=f"Frame: {self.current_frame} | Hit: {role} - {aoi}")
+        else:
+            self.lbl_info.config(text=f"Frame: {self.current_frame} | No Gaze Data")
+
+        # --- CORREZIONE RENDERING ---
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(frame)
+        
+        # Ottieni dimensioni attuali della label
+        w = self.lbl_video.winfo_width()
+        h = self.lbl_video.winfo_height()
+        
+        # Fallback se non ancora renderizzata, altrimenti usa dimensioni reali
+        if w < 50 or h < 50:
+            render_w, render_h = 800, 600
+        else:
+            render_w, render_h = w, h
+
+        img.thumbnail((render_w, render_h), Image.Resampling.LANCZOS)
+        
+        self.tk_img = ImageTk.PhotoImage(image=img)
+        self.lbl_video.configure(image=self.tk_img)
+        self.lbl_video.image = self.tk_img  # type: ignore # <--- ANCORAGGIO DI SICUREZZA

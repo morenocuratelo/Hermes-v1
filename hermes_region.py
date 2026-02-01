@@ -194,7 +194,7 @@ class RegionView:
     def open_profile_wizard(self):
         win = tk.Toplevel(self.parent)
         win.title("Wizard Profilo Avanzato")
-        win.geometry("450x650")
+        win.geometry("500x750")
         
         # --- Variabili ---
         v_name = tk.StringVar(value="New_Strategy_Profile")
@@ -206,40 +206,89 @@ class RegionView:
         v_feet_off = tk.IntVar(value=30)
         v_peri_exp = tk.DoubleVar(value=2.5)
         
-        # Strategie (1=AOI Completi, 2=Solo Box, 0=Nascondi)
-        v_strat_target = tk.IntVar(value=1)
-        v_strat_others = tk.IntVar(value=2)
-        
+        # Dizionario per salvare le variabili delle scelte (Role -> IntVar)
+        self.strat_vars = {} 
+
         # --- UI Layout ---
-        # SEZIONE 1: NOME E STRATEGIE
-        tk.Label(win, text="1. Nome e Strategie", font=("Bold", 12)).pack(pady=10)
+        # SEZIONE 1: NOME
+        tk.Label(win, text="1. Nome Profilo", font=("Bold", 12)).pack(pady=(10, 5))
         
         f_name = tk.Frame(win); f_name.pack(fill=tk.X, padx=20)
         tk.Label(f_name, text="Nome File:").pack(side=tk.LEFT)
         tk.Entry(f_name, textvariable=v_name).pack(side=tk.RIGHT, fill=tk.X, expand=True)
 
-        lf_strat = tk.LabelFrame(win, text="Modalità Visualizzazione", padx=10, pady=10)
-        lf_strat.pack(fill=tk.X, padx=20, pady=10)
+        # SEZIONE 2: RUOLI
+        tk.Label(win, text="2. Configurazione Ruoli", font=("Bold", 12)).pack(pady=(15, 5))
         
-        # Target Strategy
-        tk.Label(lf_strat, text="Ruolo 'Target':", font=("Bold", 9)).grid(row=0, column=0, sticky="w")
-        tk.Radiobutton(lf_strat, text="AOI Completi (Testa/Corpo...)", variable=v_strat_target, value=1).grid(row=0, column=1, sticky="w")
-        tk.Radiobutton(lf_strat, text="Solo Box Intero", variable=v_strat_target, value=2).grid(row=1, column=1, sticky="w")
-        
-        # --- CORREZIONE QUI: Usa ttk.Separator invece di tk.Separator ---
-        ttk.Separator(lf_strat, orient=tk.HORIZONTAL).grid(row=2, column=0, columnspan=2, sticky="ew", pady=5)
-        # ----------------------------------------------------------------
-        
-        # Others Strategy
-        tk.Label(lf_strat, text="Altri ID (Default):", font=("Bold", 9)).grid(row=3, column=0, sticky="w")
-        tk.Radiobutton(lf_strat, text="AOI Completi", variable=v_strat_others, value=1).grid(row=3, column=1, sticky="w")
-        tk.Radiobutton(lf_strat, text="Solo Box Intero", variable=v_strat_others, value=2).grid(row=4, column=1, sticky="w")
-        tk.Radiobutton(lf_strat, text="Nascondi (Nessun Box)", variable=v_strat_others, value=0).grid(row=5, column=1, sticky="w")
+        # Bottone Carica Identity
+        def load_identity_wiz():
+            path = filedialog.askopenfilename(filetypes=[("Identity JSON", "*.json")])
+            if path:
+                try:
+                    with open(path, 'r') as f:
+                        data = json.load(f)
+                        roles = set(data.values())
+                        refresh_roles_ui(roles)
+                        messagebox.showinfo("Info", f"Caricati {len(roles)} ruoli dal file.")
+                except Exception as e:
+                    messagebox.showerror("Errore", str(e))
 
-        # SEZIONE 2: PARAMETRI DIMENSIONI
-        tk.Label(win, text="2. Configurazione Dimensioni", font=("Bold", 12)).pack(pady=(15,5))
+        tk.Button(win, text="📂 Carica Identity JSON (Aggiorna Lista)", command=load_identity_wiz).pack(fill=tk.X, padx=20, pady=5)
+
+        lf_strat = tk.LabelFrame(win, text="Modalità Visualizzazione", padx=10, pady=10)
+        lf_strat.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
         
-        # Definizione funzione helper per i campi
+        # Canvas per scrollare se ci sono molti ruoli
+        canvas = tk.Canvas(lf_strat, height=200)
+        sb = ttk.Scrollbar(lf_strat, orient="vertical", command=canvas.yview)
+        frame_roles = tk.Frame(canvas)
+        
+        frame_roles.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=frame_roles, anchor="nw")
+        canvas.configure(yscrollcommand=sb.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+
+        def refresh_roles_ui(roles_set):
+            # Pulisci widget esistenti
+            for w in frame_roles.winfo_children(): w.destroy()
+            self.strat_vars.clear()
+            
+            # Filtri
+            roles_set.discard("Ignore")
+            roles_set.discard("Noise")
+            roles_set.discard("Unknown")
+            
+            if not roles_set: roles_set = {"Target"}
+            roles_set.add("DEFAULT")
+
+            # Header
+            tk.Label(frame_roles, text="Ruolo", font=("Bold", 9)).grid(row=0, column=0, sticky="w", padx=5)
+            tk.Label(frame_roles, text="Strategia", font=("Bold", 9)).grid(row=0, column=1, sticky="w", padx=5)
+            
+            r_idx = 1
+            for role in sorted(list(roles_set)):
+                tk.Label(frame_roles, text=f"{role}:").grid(row=r_idx, column=0, sticky="w", padx=5, pady=2)
+                
+                val = 1 if role == "Target" else 2
+                v = tk.IntVar(value=val)
+                self.strat_vars[role] = v
+                
+                fr = tk.Frame(frame_roles)
+                fr.grid(row=r_idx, column=1, sticky="w", padx=5)
+                tk.Radiobutton(fr, text="AOI", variable=v, value=1).pack(side=tk.LEFT)
+                tk.Radiobutton(fr, text="Box", variable=v, value=2).pack(side=tk.LEFT)
+                tk.Radiobutton(fr, text="Hide", variable=v, value=0).pack(side=tk.LEFT)
+                r_idx += 1
+
+        # Inizializza con i dati correnti
+        current_roles = set(self.identity_map.values()) if self.identity_map else set()
+        refresh_roles_ui(current_roles)
+
+        # SEZIONE 3: PARAMETRI GEOMETRICI
+        tk.Label(win, text="3. Parametri Geometrici (AOI)", font=("Bold", 12)).pack(pady=(15, 5))
+        
         def add_field(p, lbl, var):
             f = tk.Frame(p); f.pack(fill=tk.X, padx=30, pady=2)
             tk.Label(f, text=lbl).pack(side=tk.LEFT)
@@ -259,6 +308,7 @@ class RegionView:
             name = v_name.get().strip()
             if not name.endswith(".json"): name += ".json"
             
+            # Funzione helper (rimane uguale a prima...)
             def build_rules(strategy_code):
                 if strategy_code == 1: # AOI Completi
                     return [
@@ -268,18 +318,17 @@ class RegionView:
                         {"name": "Peripersonal", "kps": [5,6,11,12], "margin_px": 0, "expand_factor": v_peri_exp.get()}
                     ]
                 elif strategy_code == 2: # Solo Box
-                    return [
-                        {"name": "FullBody", "kps": list(range(17)), "margin_px": 20, "expand_factor": 1.0}
-                    ]
-                else: # Nascondi (0)
-                    return []
+                    return [{"name": "FullBody", "kps": list(range(17)), "margin_px": 20, "expand_factor": 1.0}]
+                else: return [] # Nascondi (0)
+
+            # Costruzione dinamica dei ruoli
+            roles_config = {}
+            for role_name, var in self.strat_vars.items():
+                roles_config[role_name] = build_rules(var.get())
 
             new_profile = {
                 "name": name.replace(".json", ""),
-                "roles": {
-                    "Target": build_rules(v_strat_target.get()),
-                    "DEFAULT": build_rules(v_strat_others.get())
-                }
+                "roles": roles_config
             }
             
             self.pm.save_profile(name, new_profile)
@@ -372,17 +421,10 @@ class RegionView:
                 continue
                 
             # 3. Controllo Regole
-            rules = []
-            if role == "Target":
-                print("   Applicazione: Regole 'Target'")
-                rules = self.current_profile['roles'].get("Target", [])
-            else:
-                print("   Applicazione: Regole 'DEFAULT' (per Confederati/Altri)")
-                rules = self.current_profile['roles'].get("DEFAULT", [])
-            
-            if not rules:
-                print("   ❌ ERRORE: Nessuna regola trovata nel profilo per questo ruolo!")
-                continue
+            # Cerca il ruolo specifico, se non esiste usa DEFAULT, se non esiste lista vuota
+            rules = self.current_profile['roles'].get(role, self.current_profile['roles'].get("DEFAULT", []))
+            if role not in self.current_profile['roles']:
+                print(f"   ℹ️ INFO: Il ruolo '{role}' non è definito nel Profilo AOI. Vengono usate le regole 'DEFAULT'.")
             
             # 4. Controllo Calcolo Box
             for rule in rules:
@@ -500,7 +542,7 @@ class RegionView:
                 role = self.identity_map.get(str(tid), "Unknown")
                 if role in ["Ignore", "Noise", "Unknown"]: continue
                 
-                rules = self.current_profile['roles'].get("Target", []) if role == "Target" else self.current_profile['roles'].get("DEFAULT", [])
+                rules = self.current_profile['roles'].get(role, self.current_profile['roles'].get("DEFAULT", []))
                 
                 for rule in rules:
                     box = self.calculate_box(kps, rule)
@@ -538,7 +580,7 @@ class RegionView:
             for tid, kps in d.items():
                 role = self.identity_map.get(str(tid), "Unknown")
                 if role in ["Ignore", "Noise", "Unknown"]: continue
-                rules = self.current_profile['roles'].get("Target", []) if role == "Target" else self.current_profile['roles'].get("DEFAULT", [])
+                rules = self.current_profile['roles'].get(role, self.current_profile['roles'].get("DEFAULT", []))
                 for r in rules:
                     b = self.calculate_box(kps, r)
                     if b: rows.append({
