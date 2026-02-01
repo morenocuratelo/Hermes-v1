@@ -3,3 +3,4 @@ __pycache__/
 build/
 dist/
 prova1/
+yolo26x-pose.pt
