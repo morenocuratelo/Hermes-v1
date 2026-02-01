@@ -37,8 +37,8 @@ class IdentityView:  # <--- CAMBIATO NOME
         else:
             self.cast = {
                 "Target": {"color": (0, 255, 0)},       
-                "Confederate_1": {"color": (0, 255, 255)}, 
-                "Confederate_2": {"color": (0, 165, 255)}  
+                "Confederate_1": {"color": (0, 0, 255)}, 
+                "Confederate_2": {"color": (255, 0, 0)}  
             }
             self.context.cast = self.cast # Salva nel context per il futuro
 

@@ -7,8 +7,34 @@ import gzip
 import os
 import threading
 import sys
-import requests # Usiamo requests per un download migliore
+import random
+import numpy as np
+import requests
 from ultralytics import YOLO # type: ignore
+
+# --- PARAMETRI METODOLOGICI (CONSTANTS) ---
+# Esposti globalmente per riproducibilità e tuning.
+# CONF_THRESHOLD: Soglia conservativa per bilanciare Precision e Recall.
+# IOU_THRESHOLD: Soglia per la Non-Maximum Suppression (NMS).
+CONF_THRESHOLD = 0.5
+IOU_THRESHOLD = 0.7
+RANDOM_SEED = 42
+
+def set_determinism(seed=42):
+    """
+    Imposta il seed per garantire la riproducibilità scientifica dei risultati.
+    Blocca le euristiche di ottimizzazione di CUDNN che potrebbero introdurre
+    non-determinismo nell'hardware.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        # Determinismo assoluto a scapito di leggera performance
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 # --- REDIRECT PRINT TO GUI ---
 class TextRedirector(object):
@@ -40,6 +66,10 @@ class YoloView:
         self.output_path = tk.StringVar()
         self.model_name = tk.StringVar(value="yolo26x-pose.pt") 
         self.is_running = False
+        self.tracker_type = tk.StringVar(value="botsort")
+        self.conf_threshold = tk.DoubleVar(value=CONF_THRESHOLD)
+        self.match_threshold = tk.DoubleVar(value=0.7)
+        self.track_buffer = tk.IntVar(value=30)
         
         # --- SYNC CONTEXT (LETTURA) ---
         if self.context.video_path:
@@ -71,11 +101,29 @@ class YoloView:
         
         # LISTA MODELLI
         models = [
-            "yolo26x-pose.pt", "yolo26l-pose.pt", "yolo26m-pose.pt", "yolo26s-pose.pt", "yolo26n-pose.pt",
+            "yolo11x-pose.pt", "yolo11l-pose.pt", "yolo11m-pose.pt", "yolo11s-pose.pt", "yolo11n-pose.pt",
         ]
         self.cb_model = ttk.Combobox(lf_conf, textvariable=self.model_name, values=models, state="readonly", width=25)
         self.cb_model.pack(side=tk.LEFT, padx=10)
         tk.Label(lf_conf, text="(Salvataggio in: Project/Models)", fg="gray", bg="white").pack(side=tk.LEFT)
+
+        # 3b. Configurazione Tracking
+        lf_track = tk.LabelFrame(self.parent, text="Parametri Tracking", padx=10, pady=10, bg="white")
+        lf_track.pack(fill=tk.X, pady=5)
+        
+        tk.Label(lf_track, text="Tracker:", bg="white").pack(side=tk.LEFT, padx=5)
+        trackers = ["botsort", "bytetrack", "deepocsort", "ocsort"]
+        self.cb_tracker = ttk.Combobox(lf_track, textvariable=self.tracker_type, values=trackers, state="readonly", width=12)
+        self.cb_tracker.pack(side=tk.LEFT, padx=5)
+        
+        tk.Label(lf_track, text="Confidence:", bg="white").pack(side=tk.LEFT, padx=(20, 5))
+        tk.Scale(lf_track, from_=0.1, to=0.95, resolution=0.05, orient=tk.HORIZONTAL, variable=self.conf_threshold, bg="white", length=120).pack(side=tk.LEFT)
+
+        tk.Label(lf_track, text="Match Thresh:", bg="white").pack(side=tk.LEFT, padx=(10, 5))
+        tk.Scale(lf_track, from_=0.1, to=0.95, resolution=0.05, orient=tk.HORIZONTAL, variable=self.match_threshold, bg="white", length=100).pack(side=tk.LEFT)
+
+        tk.Label(lf_track, text="Buffer:", bg="white").pack(side=tk.LEFT, padx=(10, 5))
+        tk.Scale(lf_track, from_=1, to=120, resolution=1, orient=tk.HORIZONTAL, variable=self.track_buffer, bg="white", length=100).pack(side=tk.LEFT)
 
         # 4. Progress & Log
         self.progress = ttk.Progressbar(self.parent, orient=tk.HORIZONTAL, length=100, mode='determinate')
@@ -94,7 +142,7 @@ class YoloView:
 
     def _check_hardware_from_context(self):
         if self.context.device == "cuda":
-            self.lbl_hw.config(text=f"✅ ACELERAZIONE ATTIVA: {self.context.gpu_name}", fg="green")
+            self.lbl_hw.config(text=f"✅ ACCELERAZIONE ATTIVA: {self.context.gpu_name}", fg="green")
         else:
             self.lbl_hw.config(text=f"⚠️ ATTENZIONE: Nessuna GPU rilevata. Modalità CPU ({self.context.device}).", fg="orange")
 
@@ -140,15 +188,11 @@ class YoloView:
         t = threading.Thread(target=self.run_yolo_process)
         t.start()
 
-    # --- NUOVA FUNZIONE DI DOWNLOAD ---
     def _download_model_manual(self, model_name, dest_path):
-        """Scarica manualmente il modello per evitare il flood della console e gestire meglio la rete."""
         print(f"📥 Download modello in corso: {model_name}...")
-        
-        # URL ufficiali Ultralytics Assets
+        # URL ufficiali Ultralytics Assets (es. v8.3.0)
         base_url = "https://github.com/ultralytics/assets/releases/download/v8.3.0/"
         url = base_url + model_name
-        
         try:
             response = requests.get(url, stream=True, timeout=10)
             response.raise_for_status()
@@ -160,80 +204,166 @@ class YoloView:
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
-                        # Aggiorna progress bar UI (0-50% riservato al download)
                         if total_size > 0:
                             perc = int((downloaded / total_size) * 50)
                             self.parent.after(0, lambda v=perc: self.progress.config(value=v))
-            
             print("✅ Download completato.")
             return True
         except Exception as e:
             print(f"❌ Errore download: {e}")
-            if os.path.exists(dest_path): os.remove(dest_path) # Rimuovi file corrotto
+            if os.path.exists(dest_path): os.remove(dest_path)
             return False
+
+    def _generate_tracker_config(self, tracker_name):
+        filename = f"custom_{tracker_name}.yaml"
+        conf = self.conf_threshold.get()
+        match = self.match_threshold.get()
+        buf = self.track_buffer.get()
+        
+        lines = [
+            f"tracker_type: {tracker_name}",
+            f"track_high_thresh: {conf}",
+            "track_low_thresh: 0.1",
+            f"new_track_thresh: {conf}",
+            f"track_buffer: {buf}",
+            f"match_thresh: {match}"
+        ]
+        
+        if tracker_name == 'botsort':
+            lines.append("gmc_method: sparseOptFlow")
+            lines.append("proximity_thresh: 0.5")
+            lines.append("appearance_thresh: 0.25")
+            lines.append("with_reid: False")
+            
+        with open(filename, 'w') as f:
+            f.write("\n".join(lines))
+        return filename
 
     def run_yolo_process(self):
         video_file = self.video_path.get()
         out_file = self.output_path.get()
         model_name = self.model_name.get()
         
+        tracker_config = self._generate_tracker_config(self.tracker_type.get())
+        conf_value = self.conf_threshold.get()
+        
         try:
             print(f"--- Inizio Analisi ---")
-            print(f"Video: {os.path.basename(video_file)}")
-            print(f"Device: {self.context.device.upper()}")
             
+            # Controllo esistenza file configurazione tracker
+            if not os.path.exists(tracker_config):
+                print(f"⚠️ ATTENZIONE: '{tracker_config}' non trovato nella cartella di lavoro.")
+                print("   YOLO userà i parametri di default (potrebbero non essere ottimizzati per Human Pose).")
+            else:
+                print(f"✅ Configurazione tracker generata: {tracker_config}")
+
+            print(f"Seed di riproducibilità: {RANDOM_SEED}")
+            set_determinism(RANDOM_SEED)
+
             # 1. GESTIONE MODELLO
             model_path = os.path.join(self.context.paths["models"], model_name)
-            
             if not os.path.exists(model_path):
-                print(f"Il modello {model_name} non è presente nella cartella Models.")
+                print(f"Modello mancante, avvio download: {model_name}")
                 success = self._download_model_manual(model_name, model_path)
                 if not success:
-                    raise Exception("Impossibile scaricare il modello. Controlla internet o scaricalo manualmente.")
+                    raise Exception("Impossibile scaricare il modello.")
             else:
-                print(f"Modello trovato in: {model_path}")
-                self.progress.config(value=50) # Skip download progress
+                self.progress.config(value=50)
 
             # 2. CARICAMENTO
-            print("Caricamento pesi YOLO in memoria...")
+            print("Caricamento pesi YOLO in VRAM...")
             model = YOLO(model_path) 
             
-            # 3. TRACKING
+            # 3. PREPARAZIONE METADATI
             cap = cv2.VideoCapture(video_file)
+            if not cap.isOpened():
+                raise IOError(f"Impossibile aprire il video: {video_file}")
+                
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
             cap.release()
             
-            # Ricalibra progress bar per la fase di tracking (dal 50% al 100%)
-            self.parent.after(0, lambda: self.progress.configure(maximum=total_frames + (total_frames))) 
+            self.parent.after(0, lambda: self.progress.configure(maximum=total_frames + total_frames)) 
             
-            print("Avvio tracking video...")
+            print(f"Avvio tracking {tracker_config} (Conf: {conf_value}, IoU: {IOU_THRESHOLD})...")
+            
+            # ---------------------------------------------------------
+            # [SECTION: COMPUTER VISION PIPELINE]
+            # Questa sezione incapsula la logica di inferenza.
+            # ---------------------------------------------------------
+            # 1. GENERATORE STREAMING:
+            #    L'argomento stream=True crea un iteratore lazy. I frame 
+            #    vengono decodificati e passati alla GPU uno alla volta, 
+            #    prevenendo overflow di memoria su video lunghi.
+            #
+            # 2. BYTETRACK ASSOCIATION (persist=True):
+            #    A differenza di DeepSORT, ByteTrack associa detection ad 
+            #    bassa confidenza se coerenti con la traiettoria del filtro 
+            #    di Kalman. Questo riduce la frammentazione degli ID in 
+            #    caso di occlusioni parziali.
+            # ---------------------------------------------------------
             
             results = model.track(
                 source=video_file,
                 stream=True,
                 persist=True,
-                tracker="bytetrack.yaml",
-                verbose=False, # <--- DISABILITA SPAM CONSOLE DI ULTRALYTICS
-                conf=0.5,
+                tracker=tracker_config,
+                verbose=False,
+                conf=conf_value, # Soglia parametrica
+                iou=IOU_THRESHOLD,   # Soglia NMS
                 device=0 if self.context.device == "cuda" else "cpu"
             )
             
             with gzip.open(out_file, 'wt', encoding='utf-8') as f:
                 for i, result in enumerate(results):
+                    # -----------------------------------------------------
+                    # [DATA EXTRACTION LAYER]
+                    # Estrazione diretta dai tensori CUDA per evitare overhead.
+                    # -----------------------------------------------------
+                    # result.boxes.xywh: Coordinate normalizzate centro-dimensione
+                    # result.boxes.id: Identificativo univoco tracciamento
+                    # result.keypoints: Coordinate scheletriche (Pose estimation)
+                    
+                    # Spostamento tensori da VRAM a RAM
+                    boxes = result.boxes.xywh.cpu().numpy() if result.boxes else np.array([])
+                    ids = result.boxes.id.cpu().numpy() if result.boxes and result.boxes.id is not None else np.array([])
+                    confs = result.boxes.conf.cpu().numpy() if result.boxes else np.array([])
+                    
+                    # Keypoints: [N, 17, 3] -> (x, y, visibility)
+                    keypoints = result.keypoints.data.cpu().numpy() if result.keypoints else np.array([])
+
+                    det_list = []
+                    # Iterazione sulle detection del singolo frame
+                    for j in range(len(boxes)):
+                        track_id = int(ids[j]) if len(ids) > 0 else -1
+                        
+                        # Serializzazione ottimizzata
+                        det_data = {
+                            "id": track_id,
+                            "bbox": boxes[j].tolist(), # [cx, cy, w, h]
+                            "conf": float(confs[j]),
+                            "kpts": keypoints[j].tolist() if len(keypoints) > 0 else []
+                        }
+                        det_list.append(det_data)
+
+                    # Struttura dati finale per il frame
                     frame_data = {
                         "f_idx": i,
-                        "det": json.loads(result.to_json())
+                        "ts": round(i / fps, 4) if fps > 0 else 0, # Timestamp assoluto 4 cifre decimali
+                        "det": det_list
                     }
+                    
+                    # Scrittura riga JSONL (line-delimited)
                     f.write(json.dumps(frame_data) + "\n")
                     
+                    # -----------------------------------------------------
+                    # UI UPDATE (Non-Blocking)
+                    # -----------------------------------------------------
                     if i % 10 == 0:
-                        # Aggiorna progress bar (offset di partenza per considerare il download fatto)
-                        # Usiamo un valore fittizio alto per muovere la barra nella seconda metà
                         current_val = total_frames + i 
                         self.parent.after(0, lambda v=current_val: self.progress.config(value=v))
-                        
                         if i % 100 == 0:
-                            print(f"Elaborato Frame: {i}/{total_frames}")
+                            print(f"Elaborato Frame: {i}/{total_frames} | Oggetti tracciati: {len(det_list)}")
 
             print(f"✅ COMPLETATO! Output salvato in:\n{out_file}")
             
@@ -241,8 +371,10 @@ class YoloView:
             messagebox.showinfo("Finito", "Analisi completata.")
             
         except Exception as e:
-            print(f"❌ ERRORE: {str(e)}")
-            messagebox.showerror("Errore", str(e))
+            print(f"❌ ERRORE CRITICO: {str(e)}")
+            import traceback
+            traceback.print_exc() # Stampa stack trace per debug profondo
+            messagebox.showerror("Errore", f"Errore durante l'analisi:\n{str(e)}")
             
         finally:
             self.is_running = False

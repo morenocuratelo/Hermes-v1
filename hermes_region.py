@@ -22,15 +22,44 @@ class AOIProfileManager:
         
     def create_default_profile(self):
         profile = {
-            "name": "BW Invasion Standard",
+            "name": "BW Invasion Granular",
             "roles": {
                 "Target": [
-                    {"name": "Head", "kps": [0, 1, 2, 3, 4], "margin_px": 30, "expand_factor": 1.0},
-                    {"name": "Body", "kps": [5, 6, 7, 8, 9, 10, 11, 12, 13, 14], "margin_px": 20, "expand_factor": 1.0},
-                    {"name": "Feet", "kps": [15, 16], "margin_px": 20, "expand_factor": 1.0, "offset_y_bottom": 30},
-                    {"name": "Peripersonal", "kps": [5, 6, 11, 12], "margin_px": 0, "expand_factor": 2.5}
+                    {
+                        "name": "Face",
+                        "kps": [0, 1, 2, 3, 4],
+                        "margin_px": 30,
+                        "expand_factor": 1.0
+                    },
+                    {
+                        "name": "Torso",
+                        "kps": [5, 6, 11, 12],
+                        "margin_px": 20,
+                        "expand_factor": 1.0
+                    },
+                    {
+                        "name": "Arms",
+                        "kps": [7, 8, 9, 10],
+                        "margin_px": 20,
+                        "expand_factor": 1.0
+                    },
+                    {
+                        "name": "Legs",
+                        "kps": [13, 14, 15, 16],
+                        "margin_px": 20,
+                        "expand_factor": 1.0
+                    },
+                    {
+                        "name": "Peripersonal",
+                        # Somma di: Head(0-4) + Torso(5-10) + Legs(11-14) + Feet(15-16) = Tutto il corpo (0-16)
+                        "kps": list(range(17)), 
+                        "margin_px": 0,
+                        # Moltiplicatore alto per creare l'area di prossimità estesa
+                        "expand_factor": 3.0 
+                    }
                 ],
                 "DEFAULT": [
+                    # Include tutti i 17 punti (0-16)
                     {"name": "FullBody", "kps": list(range(17)), "margin_px": 20, "expand_factor": 1.0}
                 ]
             }
@@ -79,6 +108,7 @@ class RegionView:
         self.cap = None
         self.current_frame = 0
         self.total_frames = 0
+        self.fps = 30.0
         self.is_playing = False
         
         self._setup_ui()
@@ -384,6 +414,7 @@ class RegionView:
         self.context.video_path = path
         self.cap = cv2.VideoCapture(path)
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
         self.slider.config(to=self.total_frames-1)
         self.show_frame()
 
@@ -510,8 +541,17 @@ class RegionView:
                 rules = self.current_profile['roles'].get("Target", []) if role == "Target" else self.current_profile['roles'].get("DEFAULT", [])
                 for r in rules:
                     b = self.calculate_box(kps, r)
-                    if b: rows.append({"Frame":f, "ID":tid, "Role":role, "AOI":r['name'], "x1":b[0], "y1":b[1], "x2":b[2], "y2":b[3]})
+                    if b: rows.append({
+                        "Frame": f,
+                        "Timestamp": round(f / self.fps, 4),
+                        "TrackID": tid,
+                        "Role": role,
+                        "AOI": r['name'],
+                        "x1": b[0],
+                        "y1": b[1],
+                        "x2": b[2],
+                        "y2": b[3]
+                    })
         pd.DataFrame(rows).to_csv(out, index=False)
         self.context.aoi_csv_path = out
         messagebox.showinfo("OK", "Export completo.")
-
