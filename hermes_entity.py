@@ -74,7 +74,9 @@ class IdentityView:  # <--- CAMBIATO NOME
         
         btns = tk.Frame(ctrl)
         btns.pack(pady=5)
-        tk.Button(btns, text="📂 Carica Dati", command=self.browse_data).pack(side=tk.LEFT, padx=5)
+        tk.Button(btns, text="📂 Carica Video", command=self.browse_video).pack(side=tk.LEFT, padx=5)
+        tk.Button(btns, text="📂 Carica Yolo", command=self.browse_pose).pack(side=tk.LEFT, padx=5)
+        tk.Button(btns, text="📂 Carica Mappatura", command=self.load_mapping).pack(side=tk.LEFT, padx=5)
         tk.Button(btns, text="⏯ Play/Pausa", command=self.toggle_play).pack(side=tk.LEFT, padx=5)
         tk.Button(btns, text="💾 SALVA MAPPATURA", bg="#4CAF50", fg="white", font=("bold"), command=self.save_mapping).pack(side=tk.LEFT, padx=20)
 
@@ -369,46 +371,104 @@ class IdentityView:  # <--- CAMBIATO NOME
             b,g,r = self.cast[n]['color']
             self.tree.tag_configure(n, background='#{:02x}{:02x}{:02x}'.format(min(r+180,255), min(g+180,255), min(b+180,255)))
 
-    def browse_data(self):
-        # Sostituisce il vecchio load_data collegato al bottone
+    def browse_video(self):
         v = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.avi *.mov")]) 
-        if not v: return
+        if v: self.load_data_direct(v, self.json_path)
+
+    def browse_pose(self):
         j = filedialog.askopenfilename(filetypes=[("Pose JSON", "*.json.gz")])
-        if not j: return
-        self.load_data_direct(v, j)
+        if j: self.load_data_direct(self.video_path, j)
 
     def load_data_direct(self, video_path, json_path):
-        self.video_path = video_path
-        self.json_path = json_path
+        if video_path:
+            self.video_path = video_path
+            self.context.video_path = video_path
         
-        # AGGIORNA IL CONTEXT
-        self.context.video_path = video_path
-        self.context.pose_data_path = json_path
+        if json_path:
+            self.json_path = json_path
+            self.context.pose_data_path = json_path
 
-        self.cap = cv2.VideoCapture(self.video_path)
-        self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
-        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.slider.config(to=self.total_frames-1)
+        if self.video_path and os.path.exists(self.video_path):
+            self.cap = cv2.VideoCapture(self.video_path)
+            self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
+            self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            self.slider.config(to=self.total_frames-1)
         
-        self.tracks = {}; self.id_lineage = {}
+        if self.json_path and os.path.exists(self.json_path):
+            self.tracks = {}; self.id_lineage = {}
+            has_untracked = False
 
-        try:
-            with gzip.open(json_path, 'rt', encoding='utf-8') as f:
-                for line in f:
-                    d = json.loads(line)
-                    idx = d['f_idx']
-                    for det in d['det']:
-                        tid = det.get('track_id')
-                        if tid is None: continue
-                        tid = int(tid)
-                        if tid not in self.tracks:
-                            self.tracks[tid] = {'frames':[], 'boxes':[], 'role':'Ignore', 'merged_from':[tid]}
-                            self.id_lineage[tid] = tid
-                        self.tracks[tid]['frames'].append(idx)
-                        b=det['box']
-                        self.tracks[tid]['boxes'].append([b['x1'],b['y1'],b['x2'],b['y2']])
-        except Exception as e: messagebox.showerror("Err", str(e))
+            try:
+                with gzip.open(self.json_path, 'rt', encoding='utf-8') as f:
+                    for line in f:
+                        d = json.loads(line)
+                        idx = d['f_idx']
+                        for i, det in enumerate(d['det']):
+                            tid = det.get('track_id')
+                            
+                            if tid is None: tid = -1
+                            tid = int(tid)
+                            
+                            # Se ID è -1 (Tracker spento), genera ID univoco per evitare merging errato
+                            if tid == -1:
+                                # Genera un ID univoco basato su frame e indice detection
+                                # 9000000 è un offset sicuro per non sovrascrivere ID reali
+                                tid = 9000000 + (idx * 1000) + i
+                                has_untracked = True
+                            
+                            if tid not in self.tracks:
+                                self.tracks[tid] = {'frames':[], 'boxes':[], 'role':'Ignore', 'merged_from':[tid]}
+                                self.id_lineage[tid] = tid
+                            self.tracks[tid]['frames'].append(idx)
+                            b=det['box']
+                            self.tracks[tid]['boxes'].append([b['x1'],b['y1'],b['x2'],b['y2']])
+            except Exception as e: messagebox.showerror("Err", str(e))
+            
+            if has_untracked:
+                self.hide_short_var.set(False)
+                print("Info: Rilevate detection non tracciate (ID -1). 'Nascondi brevi' disattivato per mostrare i singoli frame.")
+            
         self.refresh_tree(); self.show_frame()
+
+    def load_mapping(self):
+        if not self.tracks:
+            messagebox.showwarning("Attenzione", "Carica prima i dati video e pose (YOLO).")
+            return
+
+        f = filedialog.askopenfilename(filetypes=[("Identity JSON", "*.json")])
+        if not f: return
+        
+        try:
+            with open(f, 'r') as file:
+                mapping = json.load(file)
+            
+            loaded_count = 0
+            new_roles = set()
+            
+            for tid_str, role in mapping.items():
+                tid = int(tid_str)
+                if tid in self.tracks:
+                    self.tracks[tid]['role'] = role
+                    loaded_count += 1
+                    if role not in self.cast and role != "Ignore":
+                        new_roles.add(role)
+            
+            # Aggiungi nuovi ruoli al cast se non esistono
+            for role in new_roles:
+                self.cast[role] = {"color": (random.randint(50, 200), random.randint(50, 200), random.randint(50, 200))}
+            
+            self.refresh_cast_list()
+            self.refresh_tree()
+            self.show_frame()
+            
+            # Aggiorna context
+            if self.context:
+                self.context.identity_map_path = f
+                
+            messagebox.showinfo("Caricato", f"Ripristinate {loaded_count} assegnazioni.\nNuovi ruoli aggiunti: {len(new_roles)}")
+                
+        except Exception as e:
+            messagebox.showerror("Errore", f"Impossibile caricare il file:\n{e}")
 
     def save_mapping(self):
         if not self.json_path:
@@ -521,4 +581,3 @@ class IdentityView:  # <--- CAMBIATO NOME
         img.thumbnail((self.lbl_video.winfo_width(), self.lbl_video.winfo_height()))
         self.tk_img = ImageTk.PhotoImage(image=img)
         self.lbl_video.config(image=self.tk_img)
-

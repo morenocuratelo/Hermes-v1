@@ -3,4 +3,8 @@ __pycache__/
 build/
 dist/
 prova1/
+prova2/
+prova3/
+prova4/
+GC/
 yolo26x-pose.pt

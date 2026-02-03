@@ -112,7 +112,7 @@ class YoloView:
         lf_track.pack(fill=tk.X, pady=5)
         
         tk.Label(lf_track, text="Tracker:", bg="white").pack(side=tk.LEFT, padx=5)
-        trackers = ["botsort", "bytetrack", "deepocsort", "ocsort"]
+        trackers = ["nessuno", "botsort", "bytetrack", "deepocsort", "ocsort"]
         self.cb_tracker = ttk.Combobox(lf_track, textvariable=self.tracker_type, values=trackers, state="readonly", width=12)
         self.cb_tracker.pack(side=tk.LEFT, padx=5)
         
@@ -229,6 +229,9 @@ class YoloView:
             f"match_thresh: {match}"
         ]
         
+        if tracker_name in ('botsort', 'bytetrack'):
+            lines.append("fuse_score: True")
+
         if tracker_name == 'botsort':
             lines.append("gmc_method: sparseOptFlow")
             lines.append("proximity_thresh: 0.5")
@@ -303,16 +306,30 @@ class YoloView:
             #    caso di occlusioni parziali.
             # ---------------------------------------------------------
             
-            results = model.track(
-                source=video_file,
-                stream=True,
-                persist=True,
-                tracker=tracker_config,
-                verbose=False,
-                conf=conf_value, # Soglia parametrica
-                iou=IOU_THRESHOLD,   # Soglia NMS
-                device=0 if self.context.device == "cuda" else "cpu"
-            )
+            # Verifica se il tracker è attivo
+            is_tracker_enabled = self.tracker_type.get() != "nessuno"
+            
+            if is_tracker_enabled:
+                results = model.track(
+                    source=video_file,
+                    stream=True,
+                    persist=True,
+                    tracker=tracker_config,
+                    verbose=False,
+                    conf=conf_value,
+                    iou=IOU_THRESHOLD,
+                    device=0 if self.context.device == "cuda" else "cpu"
+                )
+            else:
+                print("Avvio analisi SENZA tracker (solo detection)...")
+                results = model.predict(
+                    source=video_file,
+                    stream=True,
+                    verbose=False,
+                    conf=conf_value,
+                    iou=IOU_THRESHOLD,
+                    device=0 if self.context.device == "cuda" else "cpu"
+                )
             
             with gzip.open(out_file, 'wt', encoding='utf-8') as f:
                 for i, result in enumerate(results):
@@ -325,7 +342,7 @@ class YoloView:
                     # result.keypoints: Coordinate scheletriche (Pose estimation)
                     
                     # Spostamento tensori da VRAM a RAM
-                    boxes = result.boxes.xywh.cpu().numpy() if result.boxes else np.array([])  # type: ignore
+                    boxes = result.boxes.xyxy.cpu().numpy() if result.boxes else np.array([])  # type: ignore
                     ids = result.boxes.id.cpu().numpy() if result.boxes and result.boxes.id is not None else np.array([])  # type: ignore
                     confs = result.boxes.conf.cpu().numpy() if result.boxes else np.array([])  # type: ignore
                     
@@ -337,12 +354,15 @@ class YoloView:
                     for j in range(len(boxes)):
                         track_id = int(ids[j]) if len(ids) > 0 else -1
                         
+                        # Format box for hermes_entity (x1, y1, x2, y2)
+                        b = boxes[j].tolist()
+                        
                         # Serializzazione ottimizzata
                         det_data = {
-                            "id": track_id,
-                            "bbox": boxes[j].tolist(), # [cx, cy, w, h]
+                            "track_id": track_id,
+                            "box": {"x1": b[0], "y1": b[1], "x2": b[2], "y2": b[3]},
                             "conf": float(confs[j]),
-                            "kpts": keypoints[j].tolist() if len(keypoints) > 0 else []
+                            "keypoints": keypoints[j].tolist() if len(keypoints) > 0 else []
                         }
                         det_list.append(det_data)
 
