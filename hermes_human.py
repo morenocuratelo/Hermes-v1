@@ -10,6 +10,7 @@ import sys
 import random
 import numpy as np
 import requests
+import csv
 from ultralytics import YOLO # type: ignore
 
 # --- PARAMETRI METODOLOGICI (CONSTANTS) ---
@@ -19,6 +20,7 @@ from ultralytics import YOLO # type: ignore
 CONF_THRESHOLD = 0.5
 IOU_THRESHOLD = 0.7
 RANDOM_SEED = 42
+ULTRALYTICS_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/"
 
 def set_determinism(seed=42):
     """
@@ -68,8 +70,15 @@ class YoloView:
         self.is_running = False
         self.tracker_type = tk.StringVar(value="botsort")
         self.conf_threshold = tk.DoubleVar(value=CONF_THRESHOLD)
-        self.match_threshold = tk.DoubleVar(value=0.7)
-        self.track_buffer = tk.IntVar(value=30)
+        self.iou_threshold = tk.DoubleVar(value=IOU_THRESHOLD)
+        self.match_threshold = tk.DoubleVar(value=0.7) #pronome
+        self.track_buffer = tk.IntVar(value=30) #Buffer da capire
+        
+        # --- PARAMETRI AVANZATI TRACKER ---
+        self.track_low_thresh = tk.DoubleVar(value=0.1)
+        self.proximity_thresh = tk.DoubleVar(value=0.5)
+        self.appearance_thresh = tk.DoubleVar(value=0.25)
+        self.with_reid = tk.BooleanVar(value=False)
         
         # --- SYNC CONTEXT (LETTURA) ---
         if self.context.video_path:
@@ -91,7 +100,7 @@ class YoloView:
         lf_files.pack(fill=tk.X, pady=5)
         
         self._add_picker(lf_files, "Video Input:", self.video_path, "*.mp4 *.avi *.mov")
-        self._add_picker(lf_files, "Output JSON (.gz):", self.output_path, "*.json.gz", save=True)
+        self._add_picker(lf_files, "Output JSON (.gz):", self.output_path, "*.json.gz", save=True) #capire altri formati
 
         # 3. Configurazione Modello
         lf_conf = tk.LabelFrame(self.parent, text="Configurazione Modello AI", padx=10, pady=10, bg="white")
@@ -101,7 +110,7 @@ class YoloView:
         
         # LISTA MODELLI
         models = [
-            "yolo11x-pose.pt", "yolo11l-pose.pt", "yolo11m-pose.pt", "yolo11s-pose.pt", "yolo11n-pose.pt",
+            "yolo26x-pose.pt", "yolo26l-pose.pt", "yolo26m-pose.pt", "yolo26s-pose.pt", "yolo26n-pose.pt",
         ]
         self.cb_model = ttk.Combobox(lf_conf, textvariable=self.model_name, values=models, state="readonly", width=25)
         self.cb_model.pack(side=tk.LEFT, padx=10)
@@ -117,7 +126,10 @@ class YoloView:
         self.cb_tracker.pack(side=tk.LEFT, padx=5)
         
         tk.Label(lf_track, text="Confidence:", bg="white").pack(side=tk.LEFT, padx=(20, 5))
-        tk.Scale(lf_track, from_=0.1, to=0.95, resolution=0.05, orient=tk.HORIZONTAL, variable=self.conf_threshold, bg="white", length=120).pack(side=tk.LEFT)
+        tk.Scale(lf_track, from_=0.1, to=0.95, resolution=0.05, orient=tk.HORIZONTAL, variable=self.conf_threshold, bg="white", length=100).pack(side=tk.LEFT)
+
+        tk.Label(lf_track, text="IoU:", bg="white").pack(side=tk.LEFT, padx=(5, 5))
+        tk.Scale(lf_track, from_=0.1, to=0.95, resolution=0.05, orient=tk.HORIZONTAL, variable=self.iou_threshold, bg="white", length=100).pack(side=tk.LEFT)
 
         tk.Label(lf_track, text="Match Thresh:", bg="white").pack(side=tk.LEFT, padx=(10, 5))
         tk.Scale(lf_track, from_=0.1, to=0.95, resolution=0.05, orient=tk.HORIZONTAL, variable=self.match_threshold, bg="white", length=100).pack(side=tk.LEFT)
@@ -125,8 +137,11 @@ class YoloView:
         tk.Label(lf_track, text="Buffer:", bg="white").pack(side=tk.LEFT, padx=(10, 5))
         tk.Scale(lf_track, from_=1, to=120, resolution=1, orient=tk.HORIZONTAL, variable=self.track_buffer, bg="white", length=100).pack(side=tk.LEFT)
 
+        # Bottone Avanzate
+        tk.Button(lf_track, text="⚙ Avanzate", command=self.open_tracker_settings).pack(side=tk.LEFT, padx=10)
+
         # 4. Progress & Log
-        self.progress = ttk.Progressbar(self.parent, orient=tk.HORIZONTAL, length=100, mode='determinate')
+        self.progress = ttk.Progressbar(self.parent, orient=tk.HORIZONTAL, length=100, mode='determinate') 
         self.progress.pack(fill=tk.X, pady=10)
         
         self.log_text = scrolledtext.ScrolledText(self.parent, height=12, state='disabled', font=("Consolas", 9))
@@ -177,6 +192,29 @@ class YoloView:
             var.set(f)
             self.context.pose_data_path = f
 
+    def open_tracker_settings(self):
+        """Apre una finestra per i parametri nascosti del tracker."""
+        win = tk.Toplevel(self.parent)
+        win.title("Parametri Avanzati Tracker")
+        win.geometry("350x400")
+        
+        tk.Label(win, text="ByteTrack / BoT-SORT Settings", font=("Segoe UI", 10, "bold")).pack(pady=10)
+        
+        def add_scale(lbl, var, from_, to_, res):
+            f = tk.Frame(win); f.pack(fill=tk.X, padx=15, pady=5)
+            tk.Label(f, text=lbl).pack(anchor="w")
+            tk.Scale(f, from_=from_, to=to_, resolution=res, orient=tk.HORIZONTAL, variable=var).pack(fill=tk.X)
+
+        add_scale("Track Low Threshold (Recupero tracce deboli):", self.track_low_thresh, 0.01, 0.6, 0.01)
+        add_scale("Proximity Threshold (BoT-SORT):", self.proximity_thresh, 0.1, 1.0, 0.05)
+        add_scale("Appearance Threshold (BoT-SORT):", self.appearance_thresh, 0.1, 1.0, 0.05)
+        
+        f_chk = tk.Frame(win); f_chk.pack(fill=tk.X, padx=15, pady=15)
+        tk.Checkbutton(f_chk, text="Abilita Re-Identification (ReID)", variable=self.with_reid).pack(anchor="w")
+        tk.Label(f_chk, text="(Richiede download automatico pesi ReID extra)", fg="gray", font=("Arial", 8)).pack(anchor="w")
+        
+        tk.Button(win, text="Chiudi", command=win.destroy, width=15).pack(pady=10)
+
     def start_thread(self):
         if self.is_running: return
         if not self.video_path.get() or not self.output_path.get():
@@ -191,8 +229,7 @@ class YoloView:
     def _download_model_manual(self, model_name, dest_path):
         print(f"📥 Download modello in corso: {model_name}...")
         # URL ufficiali Ultralytics Assets (es. v8.3.0)
-        base_url = "https://github.com/ultralytics/assets/releases/download/v8.3.0/"
-        url = base_url + model_name
+        url = ULTRALYTICS_URL + model_name
         try:
             response = requests.get(url, stream=True, timeout=10)
             response.raise_for_status()
@@ -200,7 +237,7 @@ class YoloView:
             
             with open(dest_path, 'wb') as f:
                 downloaded = 0
-                for chunk in response.iter_content(chunk_size=8192):
+                for chunk in response.iter_content(chunk_size=8192): #capire 8192
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
@@ -214,16 +251,22 @@ class YoloView:
             if os.path.exists(dest_path): os.remove(dest_path)
             return False
 
-    def _generate_tracker_config(self, tracker_name):
+    def _generate_tracker_config(self, tracker_name, reid_weights=None):
         filename = f"custom_{tracker_name}.yaml"
         conf = self.conf_threshold.get()
         match = self.match_threshold.get()
         buf = self.track_buffer.get()
         
+        # Parametri Avanzati
+        low_thresh = self.track_low_thresh.get()
+        prox = self.proximity_thresh.get()
+        app = self.appearance_thresh.get()
+        reid = self.with_reid.get()
+        
         lines = [
             f"tracker_type: {tracker_name}",
             f"track_high_thresh: {conf}",
-            "track_low_thresh: 0.1",
+            f"track_low_thresh: {low_thresh}",
             f"new_track_thresh: {conf}",
             f"track_buffer: {buf}",
             f"match_thresh: {match}"
@@ -234,25 +277,121 @@ class YoloView:
 
         if tracker_name == 'botsort':
             lines.append("gmc_method: sparseOptFlow")
-            lines.append("proximity_thresh: 0.5")
-            lines.append("appearance_thresh: 0.25")
-            lines.append("with_reid: False")
+            lines.append(f"proximity_thresh: {prox}")
+            lines.append(f"appearance_thresh: {app}")
+            
+            if reid and reid_weights:
+                lines.append("with_reid: True")
+                lines.append(f"model: {reid_weights}")
+            elif reid:
+                # Fallback legacy (assumes file in CWD)
+                lines.append("with_reid: True")
+                lines.append("model: osnet_x0_25_msmt17.pt")
+            else:
+                lines.append("with_reid: False")
             
         with open(filename, 'w') as f:
             f.write("\n".join(lines))
         return filename
+
+    # --- NUOVO METODO HELPER PER CSV (LONG FORMAT) ---
+    def _export_to_csv_flat(self, json_gz_path):
+        """
+        Converte il JSON gerarchico in un CSV 'piatto' (Long Format).
+        Ogni riga = Una persona in un frame. Rigoroso per analisi statistica (Tidy Data).
+        """
+        try:
+            print("Convertendo output in CSV Appiattito...")
+            csv_path = json_gz_path.replace(".json.gz", ".csv")
+            
+            # 1. Definizione Header (59 Colonne per modello Pose standard)
+            # COCO Keypoints Order: 0:Nose, 1:L_Eye, 2:R_Eye, 3:L_Ear, 4:R_Ear...
+            kp_names = [
+                "Nose", "L_Eye", "R_Eye", "L_Ear", "R_Ear", 
+                "L_Shoulder", "R_Shoulder", "L_Elbow", "R_Elbow", 
+                "L_Wrist", "R_Wrist", "L_Hip", "R_Hip", 
+                "L_Knee", "R_Knee", "L_Ankle", "R_Ankle"
+            ]
+            
+            header = ["Frame", "Timestamp", "TrackID", "Conf", "Box_X1", "Box_Y1", "Box_X2", "Box_Y2"]
+            for kp in kp_names:
+                # Per ogni punto salviamo X, Y e Confidenza (C)
+                header.extend([f"{kp}_X", f"{kp}_Y", f"{kp}_C"])
+
+            # 2. Scrittura Stream
+            with open(csv_path, mode='w', newline='') as f_csv:
+                writer = csv.writer(f_csv)
+                writer.writerow(header)
+                
+                with gzip.open(json_gz_path, 'rt', encoding='utf-8') as f_json:
+                    for line in f_json:
+                        frame = json.loads(line)
+                        f_idx = frame['f_idx']
+                        ts = frame['ts']
+                        
+                        for det in frame.get('det', []):
+                            # Dati Base
+                            row = [
+                                f_idx, 
+                                ts, 
+                                det.get('track_id', -1), 
+                                det.get('conf', 0)
+                            ]
+                            
+                            # Box
+                            b = det.get('box', {})
+                            row.extend([b.get('x1',0), b.get('y1',0), b.get('x2',0), b.get('y2',0)])
+                            
+                            # Keypoints (Appiattimento 17 punti x 3 valori)
+                            kps = det.get('keypoints', [])
+                            # kps è una lista di liste [[x,y,c], [x,y,c]...]
+                            
+                            if not kps:
+                                # Se manca lo scheletro, riempiamo di zeri per mantenere l'allineamento colonne
+                                row.extend([0] * (17 * 3))
+                            else:
+                                for point in kps:
+                                    # Aggiunge X, Y. Se manca C (confidence), mette 0
+                                    row.extend(point) 
+                                    if len(point) < 3: row.append(0) 
+                            
+                            writer.writerow(row)
+                            
+            print(f"✅ Export CSV completato: {csv_path}")
+            return True
+        except Exception as e:
+            print(f"⚠️ Errore export CSV: {e}")
+            return False
+    # --------------------------------------
 
     def run_yolo_process(self):
         video_file = self.video_path.get()
         out_file = self.output_path.get()
         model_name = self.model_name.get()
         
-        tracker_config = self._generate_tracker_config(self.tracker_type.get())
         conf_value = self.conf_threshold.get()
+        iou_value = self.iou_threshold.get()
         
         try:
             print(f"--- Inizio Analisi ---")
             
+            # 0. GESTIONE REID (Download & Path Assoluto)
+            reid_path = None
+            if self.with_reid.get() and self.tracker_type.get() == 'botsort':
+                reid_name = "osnet_x0_25_msmt17.pt"
+                reid_path = os.path.join(self.context.paths["models"], reid_name)
+                
+                if not os.path.exists(reid_path):
+                    print(f"Modello ReID mancante, avvio download: {reid_name}")
+                    if not self._download_model_manual(reid_name, reid_path):
+                        print("⚠️ Download ReID fallito. Disabilito ReID.")
+                        self.with_reid.set(False)
+                        reid_path = None
+                
+                if reid_path: reid_path = reid_path.replace("\\", "/") # Fix YAML Windows paths
+
+            tracker_config = self._generate_tracker_config(self.tracker_type.get(), reid_path)
+
             # Controllo esistenza file configurazione tracker
             if not os.path.exists(tracker_config):
                 print(f"⚠️ ATTENZIONE: '{tracker_config}' non trovato nella cartella di lavoro.")
@@ -288,7 +427,7 @@ class YoloView:
             
             self.parent.after(0, lambda: self.progress.configure(maximum=total_frames + total_frames)) 
             
-            print(f"Avvio tracking {tracker_config} (Conf: {conf_value}, IoU: {IOU_THRESHOLD})...")
+            print(f"Avvio tracking {tracker_config} (Conf: {conf_value}, IoU: {iou_value})...")
             
             # ---------------------------------------------------------
             # [SECTION: COMPUTER VISION PIPELINE]
@@ -317,7 +456,7 @@ class YoloView:
                     tracker=tracker_config,
                     verbose=False,
                     conf=conf_value,
-                    iou=IOU_THRESHOLD,
+                    iou=iou_value,
                     device=0 if self.context.device == "cuda" else "cpu"
                 )
             else:
@@ -327,7 +466,7 @@ class YoloView:
                     stream=True,
                     verbose=False,
                     conf=conf_value,
-                    iou=IOU_THRESHOLD,
+                    iou=iou_value,
                     device=0 if self.context.device == "cuda" else "cpu"
                 )
             
@@ -385,7 +524,10 @@ class YoloView:
                         if i % 100 == 0:
                             print(f"Elaborato Frame: {i}/{total_frames} | Oggetti tracciati: {len(det_list)}")
 
-            print(f"✅ COMPLETATO! Output salvato in:\n{out_file}")
+            print(f"✅ Analisi YOLO completata. Output JSON salvato.")
+            
+            # Avvia conversione Matlab immediata
+            self._export_to_csv_flat(out_file)
             
             self.context.pose_data_path = out_file
             messagebox.showinfo("Finito", "Analisi completata.")

@@ -1,3 +1,4 @@
+from json.tool import main
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import json
@@ -5,6 +6,7 @@ import pandas as pd
 import os
 from datetime import datetime
 import scipy.io as sio
+import gzip
 
 # --- GESTIONE PROFILI ---
 class ProfileManager:
@@ -261,6 +263,52 @@ class TOIGeneratorView:
 
         tk.Button(main, text="GENERA TOI", bg="#007ACC", fg="white", font=("Arial", 11, "bold"), height=2, command=self.run).pack(fill=tk.X, pady=20)
 
+        # Sezione 4: Sfoltitura Dati YOLO
+        lf4 = tk.LabelFrame(main, text="4. Ottimizzazione (Sfoltitura Dati RAW)", padx=10, pady=10)
+        lf4.pack(fill=tk.X, pady=10)
+        
+        self.yolo_raw_path = tk.StringVar()
+        
+        # Auto-load se presente nel context (e se è un json.gz)
+        if self.context and self.context.pose_data_path and self.context.pose_data_path.endswith('.json.gz'):
+            self.yolo_raw_path.set(self.context.pose_data_path)
+
+        # MODIFICA QUI: Filtro per JSON.GZ
+        self._add_picker(lf4, "File YOLO (.json.gz):", self.yolo_raw_path, "*.json.gz", 4)
+        
+        tk.Button(lf4, text="✂️ TAGLIA FILE RAW (Keep only TOIs)", 
+                bg="#ff9800", fg="white", font=("Bold", 10), 
+                command=self.run_cropping).grid(row=5, column=1, pady=5, sticky="e")
+
+    def run_cropping(self):
+        # 1. Recupera percorsi
+        raw_in = self.yolo_raw_path.get().strip()
+        toi_in = self.output_file.get().strip() 
+        
+        # --- DEBUG ---
+        print("\n--- DEBUG SFOLTITURA JSON ---")
+        print(f"Raw Input: '{raw_in}' -> Esiste? {os.path.exists(raw_in)}")
+        print(f"TOI Input: '{toi_in}' -> Esiste? {os.path.exists(toi_in)}")
+
+        if not raw_in or not os.path.exists(raw_in):
+            messagebox.showwarning("File mancante", "Seleziona un file YOLO .json.gz valido.")
+            return
+
+        if not toi_in or not os.path.exists(toi_in):
+            messagebox.showwarning("File mancante", "File TOI non trovato. Generalo prima.")
+            return
+            
+        # 2. Esegui il taglio sul JSON
+        cropped_path = DataCropper.crop_yolo_json(raw_in, toi_in)
+        
+        if cropped_path:
+            # Aggiorna il context
+            if self.context:
+                self.context.pose_data_path = cropped_path
+                messagebox.showinfo("Ottimizzazione", f"File RAW sfoltito creato!\n{os.path.basename(cropped_path)}\n\nI moduli successivi useranno questo file più leggero.")
+        else:
+            messagebox.showerror("Errore", "Sfoltitura fallita. Vedi console.")
+    
     def _add_picker(self, p, lbl, var, ft, r):
         tk.Label(p, text=lbl).grid(row=r, column=0, sticky="w")
         tk.Entry(p, textvariable=var, width=45).grid(row=r+1, column=0, padx=5)
@@ -305,3 +353,68 @@ class TOIGeneratorView:
             ProfileWizard(win)
         except ImportError:
             messagebox.showerror("Errore", "Impossibile trovare hermes_master_prof.py")
+class DataCropper:
+    @staticmethod
+    def crop_yolo_json(json_gz_path, toi_path, output_suffix="_CROPPED"):
+        """
+        Legge il JSON.GZ di YOLO e il file TOI.
+        Crea un nuovo file .json.gz contenente solo i frame dal primo TOI in poi.
+        """
+        try:
+            print(f"✂️ Avvio sfoltitura RAW su: {os.path.basename(json_gz_path)}")
+            
+            # 1. Trova il tempo di inizio minimo dai TOI
+            try:
+                df_toi = pd.read_csv(toi_path, sep='\t')
+            except:
+                # Fallback se il separatore fosse diverso
+                df_toi = pd.read_csv(toi_path)
+
+            if df_toi.empty:
+                print("⚠️ File TOI vuoto, impossibile tagliare.")
+                return None
+            
+            start_cut_time = df_toi['Start'].min()
+            print(f"⏱️ Tempo di taglio individuato: {start_cut_time:.3f} sec")
+            
+            # 2. Setup percorsi
+            path_parts = os.path.splitext(os.path.splitext(json_gz_path)[0]) # Rimuove .gz poi .json
+            # Ricostruisce nome: base + suffix + .json.gz
+            new_path = f"{path_parts[0]}{output_suffix}.json.gz"
+            
+            kept_frames = 0
+            dropped_frames = 0
+            
+            # 3. Streaming Read/Write (Memoria efficiente)
+            print("⏳ Elaborazione in corso (Streaming)...")
+            with gzip.open(json_gz_path, 'rt', encoding='utf-8') as f_in, \
+                 gzip.open(new_path, 'wt', encoding='utf-8') as f_out:
+                
+                for line in f_in:
+                    try:
+                        # Parsing veloce solo per leggere il timestamp
+                        # Nota: se il file è enorme, json.loads su ogni riga è il collo di bottiglia,
+                        # ma è comunque il metodo più sicuro.
+                        frame = json.loads(line)
+                        ts = frame.get('ts', 0.0)
+                        
+                        if ts >= start_cut_time:
+                            # Scrive la riga originale intatta (veloce)
+                            f_out.write(line)
+                            kept_frames += 1
+                        else:
+                            dropped_frames += 1
+                            
+                    except json.JSONDecodeError:
+                        continue
+
+            print(f"✅ Sfoltitura completata.")
+            print(f"   Frame rimossi:   {dropped_frames}")
+            print(f"   Frame mantenuti: {kept_frames}")
+            print(f"   Salvato in:      {os.path.basename(new_path)}")
+            
+            return new_path
+
+        except Exception as e:
+            print(f"❌ Errore durante la sfoltitura JSON: {e}")
+            return None

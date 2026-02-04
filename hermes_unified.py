@@ -118,14 +118,21 @@ class HermesUnifiedApp:
         self.btn_container.pack(fill=tk.X)
 
         # B. Navigazione (Passiamo le nuove classi)
+        # FASE 1: DATI GREZZI & PREPARAZIONE
         self.add_nav("1. HUMAN (Yolo)", YoloView)
-        self.add_nav("2. ENTITY (ID)", IdentityView)
-        self.add_nav("3. REGION (AOI)", RegionView)
+        self.add_nav("2. MASTER TOI (Cut)", TOIGeneratorView) # <--- SPOSTATO QUI (Era il 4)
+        
+        # Separatore visivo: "Qui finisce il setup, inizia l'analisi"
+        tk.Frame(self.btn_container, height=2, bg="#7f8c8d").pack(fill=tk.X, pady=10)
+        
+        # FASE 2: ANALISI VISIVA (Entity & Region lavorano sul CSV Tagliato)
+        self.add_nav("3. ENTITY (ID)", IdentityView)
+        self.add_nav("4. REGION (AOI)", RegionView)
         
         # Separatore visivo
-        tk.Frame(self.btn_container, height=2, bg="gray").pack(fill=tk.X, pady=10)
-        
-        self.add_nav("4. TOI BUILDER", TOIGeneratorView)
+        tk.Frame(self.btn_container, height=2, bg="#7f8c8d").pack(fill=tk.X, pady=10)
+
+        # FASE 3: EYE TRACKING & REPORT
         self.add_nav("5. EYE MAPPING", GazeView)
         self.add_nav("6. STATS", GazeStatsView)
 

@@ -339,6 +339,83 @@ class IdentityView:  # <--- CAMBIATO NOME
         self.refresh_tree()
         self.tree.selection_set(str(master))
 
+    def split_track_at_current_frame(self):
+        """
+        Splits a selected track into two at the current video frame.
+        The second part of the track gets a new ID.
+        """
+        # 1. Validation
+        selection = self.tree.selection()
+        if not selection:
+            messagebox.showwarning("Attenzione", "Nessuna traccia selezionata.")
+            return
+        
+        if len(selection) > 1:
+            messagebox.showwarning("Attenzione", "Seleziona una sola traccia da dividere.")
+            return
+
+        track_id_to_split = int(selection[0])
+        split_frame = self.current_frame
+        
+        track_data = self.tracks.get(track_id_to_split)
+        if not track_data:
+            return
+
+        # Check if split_frame is a valid point
+        if split_frame <= track_data['frames'][0]:
+            messagebox.showinfo("Info", "Non puoi dividere una traccia al suo primo frame o prima.")
+            return
+        
+        if split_frame > track_data['frames'][-1]:
+            messagebox.showinfo("Info", "Il frame di divisione è oltre la fine della traccia.")
+            return
+
+        # 2. Data Slicing
+        try:
+            # Find the index of the first frame >= split_frame
+            split_index = next(i for i, f in enumerate(track_data['frames']) if f >= split_frame)
+        except StopIteration:
+            return # Should be caught by the check above, but for safety
+
+        # Part A (original track) and Part B (new track)
+        original_frames, new_frames = track_data['frames'][:split_index], track_data['frames'][split_index:]
+        original_boxes, new_boxes = track_data['boxes'][:split_index], track_data['boxes'][split_index:]
+
+        if not new_frames:
+            messagebox.showinfo("Info", "Non puoi dividere una traccia al suo ultimo frame.")
+            return
+
+        # --- ASK USER PREFERENCE ---
+        msg = (f"Divisione traccia {track_id_to_split} al frame {split_frame}.\n\n"
+               "Quale parte deve MANTENERE l'ID originale e il Ruolo?\n"
+               "SÌ = La parte PRECEDENTE (fino al cursore)\n"
+               "NO = La parte SUCCESSIVA (dal cursore in poi)")
+        
+        keep_head = messagebox.askyesno("Conferma Divisione", msg)
+
+        # 3. ID Generation & State Update
+        new_track_id = max(self.tracks.keys()) + 1 if self.tracks else 1
+        
+        if keep_head:
+            # Standard: ID Originale resta alla parte PRECEDENTE
+            self.tracks[track_id_to_split]['frames'], self.tracks[track_id_to_split]['boxes'] = original_frames, original_boxes
+            self.tracks[new_track_id] = {'frames': new_frames, 'boxes': new_boxes, 'role': 'Ignore', 'merged_from': [new_track_id]}
+            created_len = len(new_frames)
+        else:
+            # Swap: ID Originale passa alla parte SUCCESSIVA
+            self.tracks[track_id_to_split]['frames'], self.tracks[track_id_to_split]['boxes'] = new_frames, new_boxes
+            self.tracks[new_track_id] = {'frames': original_frames, 'boxes': original_boxes, 'role': 'Ignore', 'merged_from': [new_track_id]}
+            created_len = len(original_frames)
+
+        # FIX: Se la nuova traccia è breve (<1s) e il filtro è attivo, verrebbe nascosta.
+        # Disattiviamo il filtro automaticamente per mostrare il risultato dell'operazione.
+        if self.hide_short_var.get() and (created_len / self.fps) < 1.0:
+            self.hide_short_var.set(False)
+
+        self.refresh_tree()
+        # messagebox.showinfo("Successo", f"Traccia {track_id_to_split} divisa.\nNuova traccia creata: ID {new_track_id}.")
+        self.tree.selection_set(str(new_track_id)); self.tree.focus(str(new_track_id))
+
     def _merge_logic(self, master, slave):
         if slave not in self.tracks: return
         self.tracks[master]['frames'].extend(self.tracks[slave]['frames'])
@@ -471,30 +548,33 @@ class IdentityView:  # <--- CAMBIATO NOME
             messagebox.showerror("Errore", f"Impossibile caricare il file:\n{e}")
 
     def save_mapping(self):
-        if not self.json_path:
-            return
+        if not self.json_path: return
 
-        # 1. Definisci il nome del file
         base_name = os.path.basename(self.json_path).replace(".json.gz", "_identity.json")
-        
-        # 2. Determina il percorso (se esiste il context, usa la cartella output)
         if self.context and self.context.paths.get("output"):
             out = os.path.join(self.context.paths["output"], base_name)
         else:
             out = self.json_path.replace(".json.gz", "_identity.json")
 
-        # 3. Salvataggio fisico del file
-        mapping = {tid: d['role'] for tid, d in self.tracks.items() if d['role'] != 'None'}
+        # --- FIX CRITICO: Usa id_lineage invece di tracks ---
+        # Questo assicura che se ID 10 è stato unito a ID 5, 
+        # nel JSON finisca anche "10": "RuoloDi5", non solo "5": "RuoloDi5".
+        mapping = {}
+        for original_id, current_master in self.id_lineage.items():
+            if current_master in self.tracks:
+                role = self.tracks[current_master]['role']
+                if role != 'None':
+                    mapping[original_id] = role
+
         with open(out, 'w') as f:
             json.dump(mapping, f, indent=4)
 
-        # 4. Aggiorna il Context
         if self.context:
             self.context.identity_map_path = out
             print(f"CONTEXT: Identity Map aggiornata -> {out}")
 
         count = len(mapping)
-        messagebox.showinfo("Fatto", f"Mappati {count} ID.\nSalvato in: {out}")
+        messagebox.showinfo("Fatto", f"Mappati {count} ID (inclusi ID storici fusi).\nSalvato in: {out}")
 
     def refresh_cast_list(self):
         self.list_cast.delete(0, tk.END)
@@ -518,11 +598,15 @@ class IdentityView:  # <--- CAMBIATO NOME
             
     def change_person_color(self):
         s = self.list_cast.curselection()
-        if s:
-            n = self.list_cast.get(s[0])
-            c = colorchooser.askcolor()
-            if c[0]: 
-                r,g,b = map(int, c[0])
+        if not s: return
+
+        n = self.list_cast.get(s[0])
+        c = colorchooser.askcolor()
+        
+        if c and isinstance(c, tuple) and len(c) >= 2:
+            rgb = c[0]
+            if rgb:
+                r,g,b = map(int, rgb)
                 self.cast[n]['color'] = (b,g,r)
                 self.refresh_cast_list(); self.show_frame()
 
@@ -533,9 +617,10 @@ class IdentityView:  # <--- CAMBIATO NOME
             self.context_menu.delete(0, tk.END)
             for p in self.cast: self.context_menu.add_command(label=f"Assegna a {p}", command=lambda n=p: self.assign_sel(n))
             self.context_menu.add_separator()
-            self.context_menu.add_command(label="Rimuovi", command=lambda: self.assign_sel("Ignore"))
+            self.context_menu.add_command(label="Rimuovi Assegnazione", command=lambda: self.assign_sel("Ignore"))
             self.context_menu.add_separator()
-            self.context_menu.add_command(label="Unisci", command=self.manual_merge)
+            self.context_menu.add_command(label="🔗 Unisci Selezionati", command=self.manual_merge)
+            self.context_menu.add_command(label="✂️ Dividi al Frame Corrente", command=self.split_track_at_current_frame)
             self.context_menu.post(e.x_root, e.y_root)
 
     def assign_sel(self, r):

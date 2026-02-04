@@ -120,8 +120,8 @@ class RegionView:
         if self.context.pose_data_path:
             self.load_pose_direct(self.context.pose_data_path)
             
-        if self.context.identity_path:
-            self.load_identity_direct(self.context.identity_path)
+        if self.context.identity_map_path:
+            self.load_identity_direct(self.context.identity_map_path)
 
     def _setup_ui(self):
         # Header visivo
@@ -466,7 +466,7 @@ class RegionView:
 
     def load_pose_direct(self, path):
         if not os.path.exists(path): return
-        self.context.pose_data_path = path # <--- AGGIORNA CONTEXT
+        self.context.pose_data_path = path 
         self.pose_data = {}
         print(f"--- Caricamento Pose: {os.path.basename(path)} ---")
         try:
@@ -475,21 +475,35 @@ class RegionView:
                     d = json.loads(line)
                     f_idx = d['f_idx']
                     self.pose_data[f_idx] = {}
-                    for det in d['det']:
-                        if 'keypoints' in det and 'track_id' in det:
-                            tid = int(det['track_id'])
+                    
+                    # --- FIX CRITICO: Enumerate serve per replicare il calcolo dell'ID sintetico ---
+                    for i, det in enumerate(d['det']):
+                        if 'keypoints' in det:
+                            # Gestione ID: Se manca o è -1, usa la logica sintetica di Entity
+                            raw_tid = det.get('track_id', -1)
+                            if raw_tid is None: raw_tid = -1
+                            tid = int(raw_tid)
+                            
+                            # Replicazione logica Entity per ID non tracciati
+                            if tid == -1:
+                                tid = 9000000 + (f_idx * 1000) + i
+                            
+                            # Lettura Keypoints (codice originale)
                             raw_kps = det['keypoints']
                             final_kps = []
-                            # Gestione formati YOLO vari
                             if isinstance(raw_kps, dict) and 'x' in raw_kps:
                                 xs, ys = raw_kps['x'], raw_kps['y']
                                 confs = raw_kps.get('visible', raw_kps.get('confidence', [1.0]*len(xs)))
-                                for i in range(len(xs)): final_kps.append([xs[i], ys[i], confs[i] if i<len(confs) else 0])
+                                for k in range(len(xs)): final_kps.append([xs[k], ys[k], confs[k] if k<len(confs) else 0])
                             elif isinstance(raw_kps, list):
                                 final_kps = raw_kps
+                            
                             self.pose_data[f_idx][tid] = final_kps
             print(f"Pose caricate: {len(self.pose_data)} frames.")
-        except Exception as e: messagebox.showerror("Err", str(e))
+        except Exception as e: 
+            messagebox.showerror("Err", f"Errore caricamento pose: {str(e)}")
+            import traceback
+            traceback.print_exc()
         self.show_frame()
 
     def browse_identity(self):
@@ -498,7 +512,7 @@ class RegionView:
 
     def load_identity_direct(self, path):
         if not os.path.exists(path): return
-        self.context.identity_path = path # <--- AGGIORNA CONTEXT
+        self.context.identity_map_path = path # <--- AGGIORNA CONTEXT
         with open(path, 'r') as file: self.identity_map = json.load(file)
         print(f"Identità caricate: {len(self.identity_map)} ID.")
         self.show_frame()
