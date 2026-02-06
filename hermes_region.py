@@ -113,6 +113,7 @@ class RegionView:
         self.kp_conf_thresh = tk.DoubleVar(value=0.3) # Default originale era 0.3
         
         self._setup_ui()
+        self._setup_hotkeys()
 
         # --- AUTO-LOAD DAL CONTEXT ---
         if self.context.video_path:
@@ -190,6 +191,43 @@ class RegionView:
         
         self.refresh_editors()
         tk.Button(right, text="GENERATE & EXPORT AOI CSV", bg="#4CAF50", fg="white", font=("Bold", 12), height=2, command=self.export_data).pack(side=tk.BOTTOM, fill=tk.X, pady=20)
+
+    def _setup_hotkeys(self):
+        root = self.parent.winfo_toplevel()
+        root.bind("<Space>", self._on_space)
+        root.bind("<Left>", self._on_left)
+        root.bind("<Right>", self._on_right)
+        root.bind("<Shift-Left>", self._on_shift_left)
+        root.bind("<Shift-Right>", self._on_shift_right)
+
+    def _is_hotkey_safe(self):
+        # Ensure view is visible and user is not typing
+        if not self.parent.winfo_viewable(): return False
+        focused = self.parent.focus_get()
+        if focused and focused.winfo_class() in ['Entry', 'Text', 'Spinbox', 'TEntry']:
+            return False
+        return True
+
+    def _on_space(self, event):
+        if self._is_hotkey_safe(): self.toggle_play()
+
+    def _on_left(self, event):
+        if self._is_hotkey_safe(): self.seek_relative(-1)
+
+    def _on_right(self, event):
+        if self._is_hotkey_safe(): self.seek_relative(1)
+
+    def _on_shift_left(self, event):
+        if self._is_hotkey_safe(): self.seek_relative(-10)
+
+    def _on_shift_right(self, event):
+        if self._is_hotkey_safe(): self.seek_relative(10)
+
+    def seek_relative(self, delta):
+        if not self.cap: return
+        self.current_frame = max(0, min(self.total_frames - 1, self.current_frame + delta))
+        self.slider.set(self.current_frame)
+        self.show_frame()
 
     def open_profile_wizard(self):
         win = tk.Toplevel(self.parent)

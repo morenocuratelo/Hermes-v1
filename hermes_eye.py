@@ -281,6 +281,7 @@ class GazeResultPlayer:
         self.lbl_info.pack(pady=2)
 
         self.win.update_idletasks()
+        self._setup_hotkeys()
         self.win.protocol("WM_DELETE_WINDOW", self.on_close)
         self.show_frame()
 
@@ -288,6 +289,31 @@ class GazeResultPlayer:
         self.is_playing = False
         if self.cap: self.cap.release()
         self.win.destroy()
+
+    def _setup_hotkeys(self):
+        self.win.bind("<Space>", self._on_space)
+        self.win.bind("<Left>", self._on_left)
+        self.win.bind("<Right>", self._on_right)
+        self.win.bind("<Shift-Left>", self._on_shift_left)
+        self.win.bind("<Shift-Right>", self._on_shift_right)
+        self.win.focus_set()
+
+    def _is_hotkey_safe(self):
+        focused = self.win.focus_get()
+        if focused and focused.winfo_class() in ['Entry', 'Text']:
+            return False
+        return True
+
+    def _on_space(self, event): 
+        if self._is_hotkey_safe(): self.toggle_play()
+    def _on_left(self, event): 
+        if self._is_hotkey_safe(): self.step(-1)
+    def _on_right(self, event): 
+        if self._is_hotkey_safe(): self.step(1)
+    def _on_shift_left(self, event): 
+        if self._is_hotkey_safe(): self.step(-10)
+    def _on_shift_right(self, event): 
+        if self._is_hotkey_safe(): self.step(10)
 
     def toggle_play(self):
         self.is_playing = not self.is_playing

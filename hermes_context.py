@@ -10,6 +10,11 @@ class AppContext:
         self.gpu_name = torch.cuda.get_device_name(0) if self.device == "cuda" else "No GPU"
         print(f"SYSTEM: Context initialized on {self.device} ({self.gpu_name})")
 
+        # Config Persistence
+        self.config_file = "hermes_config.json"
+        self.last_project = None
+        self.recent_files = {"video": [], "data": []}
+
         # 2. Project Management
         self.project_path = None
         self.paths = {
@@ -35,10 +40,43 @@ class AppContext:
         # Mapping Ruoli/Colori condiviso
         self.cast = {} 
 
+        self.load_config()
+
+    def load_config(self):
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, 'r') as f:
+                    data = json.load(f)
+                    self.last_project = data.get("last_project")
+                    self.recent_files = data.get("recent_files", {"video": [], "data": []})
+            except Exception as e:
+                print(f"Config Load Error: {e}")
+
+    def save_config(self):
+        data = {
+            "last_project": self.project_path,
+            "recent_files": self.recent_files
+        }
+        try:
+            with open(self.config_file, 'w') as f:
+                json.dump(data, f, indent=4)
+        except Exception as e:
+            print(f"Config Save Error: {e}")
+
+    def add_recent_file(self, category, path):
+        if not path: return
+        if category not in self.recent_files: self.recent_files[category] = []
+        if path in self.recent_files[category]:
+            self.recent_files[category].remove(path)
+        self.recent_files[category].insert(0, path)
+        self.recent_files[category] = self.recent_files[category][:10]
+        self.save_config()
+
     def update_video(self, path):
         """Aggiorna il percorso video nel contesto."""
         if path and os.path.exists(path):
             self.video_path = path
+            self.add_recent_file("video", path)
             print(f"CONTEXT: Video updated -> {path}")
 
     def initialize_project(self, folder_path):
@@ -66,12 +104,17 @@ class AppContext:
         # Scansiona file esistenti
         self._scan_existing_files()
         
+        self.save_config()
         print(f"PROJECT INITIALIZED: {folder_path}")
 
     def import_file(self, source_path, category="input"):
         """Copia un file nella cartella del progetto."""
         if not source_path or not os.path.exists(source_path): return None
         
+        # Track recent data files
+        if source_path.lower().endswith(('.json', '.csv', '.mat', '.tsv', '.gz')):
+            self.add_recent_file("data", source_path)
+
         filename = os.path.basename(source_path)
         dest_folder = self.paths["input"] # Default a Input
         

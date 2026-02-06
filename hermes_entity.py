@@ -48,8 +48,9 @@ class IdentityView:  # <--- CAMBIATO NOME
         self.is_playing = False
 
         self._setup_ui()
+        self._setup_hotkeys()
         
-        # AUTO-LOAD: Se Human ha finito, carica i dati automaticamente
+        # AUTO-LOAD: If Human has finished, load data automatically
         if self.context.video_path and self.context.pose_data_path:
             self.load_data_direct(self.context.video_path, self.context.pose_data_path)
 
@@ -74,12 +75,11 @@ class IdentityView:  # <--- CAMBIATO NOME
         
         btns = tk.Frame(ctrl)
         btns.pack(pady=5)
-        tk.Button(btns, text="📂 Carica Video", command=self.browse_video).pack(side=tk.LEFT, padx=5)
-        tk.Button(btns, text="📂 Carica Yolo", command=self.browse_pose).pack(side=tk.LEFT, padx=5)
-        tk.Button(btns, text="📂 Carica Mappatura", command=self.load_mapping).pack(side=tk.LEFT, padx=5)
-        tk.Button(btns, text="⏯ Play/Pausa", command=self.toggle_play).pack(side=tk.LEFT, padx=5)
-        tk.Button(btns, text="💾 SALVA MAPPATURA", bg="#4CAF50", fg="white", font=("bold"), command=self.save_mapping).pack(side=tk.LEFT, padx=20)
-
+        tk.Button(btns, text="📂 Load Video", command=self.browse_video).pack(side=tk.LEFT, padx=5)
+        tk.Button(btns, text="📂 Load Yolo", command=self.browse_pose).pack(side=tk.LEFT, padx=5)
+        tk.Button(btns, text="📂 Load Mapping", command=self.load_mapping).pack(side=tk.LEFT, padx=5)
+        tk.Button(btns, text="⏯ Play/Pause", command=self.toggle_play).pack(side=tk.LEFT, padx=5)
+        tk.Button(btns, text="💾 SAVE MAPPING", bg="#4CAF50", fg="white", font=("bold"), command=self.save_mapping).pack(side=tk.LEFT, padx=20)
         # 2. GESTIONE (DX)
         right = tk.Frame(main, padx=5, pady=5)
         main.add(right, minsize=450)
@@ -92,49 +92,49 @@ class IdentityView:  # <--- CAMBIATO NOME
         
         btn_cast = tk.Frame(lbl_cast)
         btn_cast.pack(side=tk.RIGHT, fill=tk.Y)
-        tk.Button(btn_cast, text="➕ Aggiungi", command=self.add_person).pack(fill=tk.X)
-        tk.Button(btn_cast, text="🎨 Colore", command=self.change_person_color).pack(fill=tk.X)
-        tk.Button(btn_cast, text="➖ Rimuovi", command=self.remove_person).pack(fill=tk.X)
+        tk.Button(btn_cast, text="➕ Add", command=self.add_person).pack(fill=tk.X)
+        tk.Button(btn_cast, text="🎨 Color", command=self.change_person_color).pack(fill=tk.X)
+        tk.Button(btn_cast, text="➖ Remove", command=self.remove_person).pack(fill=tk.X)
 
-        # B. TRACCE
-        lbl_tracks = tk.LabelFrame(right, text="2. Tracce YOLO & Strumenti", padx=5, pady=5)
+        # B. TRACKS
+        lbl_tracks = tk.LabelFrame(right, text="2. YOLO & Tools Tracks", padx=5, pady=5)
         lbl_tracks.pack(fill=tk.BOTH, expand=True, pady=5)
         
         # TOOLBAR
         tools = tk.Frame(lbl_tracks)
         tools.pack(fill=tk.X, pady=5)
         
-        # Checkbox nascondi brevi
-        chk = tk.Checkbutton(tools, text="Nascondi brevi (<1s)", variable=self.hide_short_var, command=self.refresh_tree)
+        # Checkbox hide short
+        chk = tk.Checkbutton(tools, text="Hide short (<1s)", variable=self.hide_short_var, command=self.refresh_tree)
         chk.pack(side=tk.LEFT, padx=5)
 
-        # --- NUOVO: BOTTONE SETTINGS ---
-        tk.Button(tools, text="⚙ Parametri", command=self.open_settings_dialog).pack(side=tk.RIGHT, padx=5)
+        # --- NEW: SETTINGS BUTTON ---
+        tk.Button(tools, text="⚙ Parameters", command=self.open_settings_dialog).pack(side=tk.RIGHT, padx=5)
         
-        # PRIMA RIGA BOTTONI (Automazioni)
+        # FIRST ROW BUTTONS (Automations)
         row1 = tk.Frame(lbl_tracks)
         row1.pack(fill=tk.X, pady=2)
         tk.Button(row1, text="⚡ Auto-Stitch", command=self.auto_stitch).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
-        tk.Button(row1, text="🧹 Assorbi Noise (Gap Fill)", command=self.absorb_noise_logic).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        tk.Button(row1, text="🧹 Absorb Noise (Gap Fill)", command=self.absorb_noise_logic).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         
-        # SECONDA RIGA BOTTONI (Merging)
+        # SECOND ROW BUTTONS (Merging)
         row2 = tk.Frame(lbl_tracks)
         row2.pack(fill=tk.X, pady=2)
-        tk.Button(row2, text="🔗 Unisci Selezionati", command=self.manual_merge).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
-        tk.Button(row2, text="🔗 Unisci TUTTI per Ruolo", bg="#d1e7dd", command=self.merge_all_by_role).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        tk.Button(row2, text="🔗 Merge Selected", command=self.manual_merge).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        tk.Button(row2, text="🔗 Merge ALL by Role", bg="#d1e7dd", command=self.merge_all_by_role).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
         # TREEVIEW
-        cols = ("ID", "Origine", "Durata", "Assegnato A")
+        cols = ("ID", "Origin", "Duration", "Assigned To")
         self.tree = ttk.Treeview(lbl_tracks, columns=cols, show="headings", selectmode="extended")
         self.tree.heading("ID", text="ID")
-        self.tree.heading("Origine", text="Storia")
-        self.tree.heading("Durata", text="Sec")
-        self.tree.heading("Assegnato A", text="Persona")
+        self.tree.heading("Origin", text="Story")
+        self.tree.heading("Duration", text="Sec")
+        self.tree.heading("Assigned To", text="Person")
         
         self.tree.column("ID", width=40)
-        self.tree.column("Origine", width=60)
-        self.tree.column("Durata", width=50)
-        self.tree.column("Assegnato A", width=100)
+        self.tree.column("Origin", width=60)
+        self.tree.column("Duration", width=50)
+        self.tree.column("Assigned To", width=100)
 
         sb = ttk.Scrollbar(lbl_tracks, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
@@ -147,14 +147,62 @@ class IdentityView:  # <--- CAMBIATO NOME
         self.context_menu = tk.Menu(self.parent, tearoff=0)
         self.refresh_cast_list()
 
-    # --- NUOVA FEATURE: DIALOG PARAMETRI ---
+    def _setup_hotkeys(self):
+        root = self.parent.winfo_toplevel()
+        # Playback & Navigation
+        root.bind("<Space>", self._on_space)
+        root.bind("<Left>", self._on_left)
+        root.bind("<Right>", self._on_right)
+        root.bind("<Shift-Left>", self._on_shift_left)
+        root.bind("<Shift-Right>", self._on_shift_right)
+        # Assignment 1-9
+        for i in range(1, 10):
+            root.bind(str(i), self._on_number)
+
+    def _is_hotkey_safe(self):
+        focused = self.parent.focus_get()
+        # Ignore hotkeys if user is typing in an Entry or Text field
+        if focused and focused.winfo_class() in ['Entry', 'Text']:
+            return False
+        return True
+
+    def _on_space(self, event):
+        if self._is_hotkey_safe(): self.toggle_play()
+
+    def _on_left(self, event):
+        if self._is_hotkey_safe(): self.seek_relative(-1)
+
+    def _on_right(self, event):
+        if self._is_hotkey_safe(): self.seek_relative(1)
+
+    def _on_shift_left(self, event):
+        if self._is_hotkey_safe(): self.seek_relative(-10)
+
+    def _on_shift_right(self, event):
+        if self._is_hotkey_safe(): self.seek_relative(10)
+
+    def seek_relative(self, delta):
+        if not self.cap: return
+        self.current_frame = max(0, min(self.total_frames - 1, self.current_frame + delta))
+        self.slider.set(self.current_frame)
+        self.show_frame()
+
+    def _on_number(self, event):
+        if not self._is_hotkey_safe(): return
+        try:
+            idx = int(event.char) - 1
+            if 0 <= idx < self.list_cast.size() and self.tree.selection():
+                self.assign_sel(self.list_cast.get(idx))
+        except ValueError: pass
+
+    # --- NEW FEATURE: SETTINGS DIALOG ---
     def open_settings_dialog(self):
-        """Apre una finestra popup per modificare i parametri hardcoded."""
+        """Opens a popup window to modify hardcoded parameters."""
         win = tk.Toplevel(self.parent)
-        win.title("Impostazioni Algoritmi")
+        win.title("Algorithm Settings")
         win.geometry("350x250")
         
-        # Variabili temporanee
+        # Temporary variables
         v_lookahead = tk.IntVar(value=self.param_lookahead)
         v_time = tk.DoubleVar(value=self.param_time_gap)
         v_s_dist = tk.IntVar(value=self.param_stitch_dist)
@@ -187,15 +235,15 @@ class IdentityView:  # <--- CAMBIATO NOME
             self.param_stitch_dist = v_s_dist.get()
             self.param_noise_dist = v_n_dist.get()
             win.destroy()
-            messagebox.showinfo("Salvataggio", "Parametri aggiornati con successo.")
+            messagebox.showinfo("Save", "Parameters updated successfully.")
 
-        tk.Button(win, text="Salva", command=save, bg="#4CAF50", fg="white").pack(pady=15)
+        tk.Button(win, text="Save", command=save, bg="#4CAF50", fg="white").pack(pady=15)
 
-    # --- LOGICHE AGGIORNATE CON PARAMETRI ---
+    # --- UPDATED LOGIC WITH PARAMETERS ---
 
     def absorb_noise_logic(self):
-        """Supervised Noise Absorption usando i parametri configurabili."""
-        if not messagebox.askyesno("Conferma", f"Assorbire il noise (Dist < {self.param_noise_dist}px)?"): return
+        """Supervised Noise Absorption using configurable parameters."""
+        if not messagebox.askyesno("Confirm", f"Absorb noise (Dist < {self.param_noise_dist}px)?"): return
         
         main_tracks = [tid for tid, d in self.tracks.items() if d['role'] in self.cast]
         candidates = [tid for tid, d in self.tracks.items() if d['role'] not in self.cast]
@@ -203,7 +251,7 @@ class IdentityView:  # <--- CAMBIATO NOME
         absorbed = 0
         changed = True
         
-        # Parametri dinamici
+        # Dynamic parameters
         MAX_DIST = self.param_noise_dist
         MAX_TIME_GAP = self.param_time_gap * self.fps
         
@@ -259,8 +307,8 @@ class IdentityView:  # <--- CAMBIATO NOME
         messagebox.showinfo("Info", f"Assorbiti {absorbed} frammenti.")
 
     def auto_stitch(self):
-        """Unsupervised Auto-Stitching usando i parametri configurabili."""
-        # Recupera parametri
+        """Unsupervised Auto-Stitching using configurable parameters."""
+        # Retrieve parameters
         p_win = self.param_lookahead
         p_time = self.param_time_gap
         p_dist = self.param_stitch_dist
@@ -304,11 +352,11 @@ class IdentityView:  # <--- CAMBIATO NOME
                     merged += 1; changed = True; break
                 i += 1
         self.refresh_tree()
-        messagebox.showinfo("Info", f"Uniti {merged} frammenti (Lookahead:{p_win}, Time:{p_time}s, Dist:{p_dist}px).")
+        messagebox.showinfo("Info", f"Stitched {merged} fragments (Lookahead:{p_win}, Time:{p_time}s, Dist:{p_dist}px).")
 
     # --- STANDARD METHODS (Unchanged) ---
     def merge_all_by_role(self):
-        if not messagebox.askyesno("Conferma", "Vuoi unire tutte le tracce assegnate allo stesso ruolo?"): return
+        if not messagebox.askyesno("Confirm", "Do you want to merge all tracks assigned to the same role?"): return
         merge_count = 0
         roles_processed = []
         for person_name in self.cast:
@@ -321,9 +369,9 @@ class IdentityView:  # <--- CAMBIATO NOME
                     merge_count += 1
                 roles_processed.append(person_name)
         self.refresh_tree()
-        if merge_count > 0: msg = f"Fusi {merge_count} frammenti per: {', '.join(roles_processed)}."
-        else: msg = "Nessuna fusione necessaria."
-        messagebox.showinfo("Risultato Merge", msg)
+        if merge_count > 0: msg = f"Merged {merge_count} fragments for: {', '.join(roles_processed)}."
+        else: msg = "No merges necessary."
+        messagebox.showinfo("Merge Result", msg)
 
     def manual_merge(self):
         sel = self.tree.selection()
@@ -354,7 +402,7 @@ class IdentityView:  # <--- CAMBIATO NOME
 
         
         if len(selection) > 1:
-            messagebox.showwarning("Attenzione", "Seleziona una sola traccia da dividere.")
+            messagebox.showwarning("Warning", "Select only one track to split.")
             return
 
         split_frame = self.current_frame
@@ -365,11 +413,11 @@ class IdentityView:  # <--- CAMBIATO NOME
 
         # Check if split_frame is a valid point
         if split_frame <= track_data['frames'][0]:
-            messagebox.showinfo("Info", "Non puoi dividere una traccia al suo primo frame o prima.")
+            messagebox.showinfo("Info", "You cannot split a track at its first frame or before.")
             return
         
         if split_frame > track_data['frames'][-1]:
-            messagebox.showinfo("Info", "Il frame di divisione è oltre la fine della traccia.")
+            messagebox.showinfo("Info", "The split frame is beyond the end of the track.")
             return
 
         # 2. Data Slicing
@@ -384,22 +432,22 @@ class IdentityView:  # <--- CAMBIATO NOME
         original_boxes, new_boxes = track_data['boxes'][:split_index], track_data['boxes'][split_index:]
 
         if not new_frames:
-            messagebox.showinfo("Info", "Non puoi dividere una traccia al suo ultimo frame.")
+            messagebox.showinfo("Info", "You cannot split a track at its last frame.")
             return
 
         # --- ASK USER PREFERENCE ---
-        msg = (f"Divisione traccia {track_id_to_split} al frame {split_frame}.\n\n"
-               "Quale parte deve MANTENERE l'ID originale e il Ruolo?\n"
-               "SÌ = La parte PRECEDENTE (fino al cursore)\n"
-               "NO = La parte SUCCESSIVA (dal cursore in poi)")
+        msg = (f"Splitting track {track_id_to_split} at frame {split_frame}.\n\n"
+               "Which part should KEEP the original ID and Role?\n"
+               "YES = The PREVIOUS part (up to the cursor)\n"
+               "NO = The NEXT part (from the cursor onwards)")
         
-        keep_head = messagebox.askyesno("Conferma Divisione", msg)
+        keep_head = messagebox.askyesno("Confirm Split", msg)
 
         # 3. ID Generation & State Update
         new_track_id = max(self.tracks.keys()) + 1 if self.tracks else 1
         
         if keep_head:
-            # Standard: ID Originale resta alla parte PRECEDENTE
+            # Standard: Original ID stays with the PREVIOUS part
             self.tracks[track_id_to_split]['frames'], self.tracks[track_id_to_split]['boxes'] = original_frames, original_boxes
             self.tracks[new_track_id] = {'frames': new_frames, 'boxes': new_boxes, 'role': 'Ignore', 'merged_from': [new_track_id]}
             created_len = len(new_frames)
@@ -488,10 +536,10 @@ class IdentityView:  # <--- CAMBIATO NOME
                             if tid is None: tid = -1
                             tid = int(tid)
                             
-                            # Se ID è -1 (Tracker spento), genera ID univoco per evitare merging errato
+                            # If ID is -1 (Tracker off), generate a unique ID to avoid incorrect merging
                             if tid == -1:
-                                # Genera un ID univoco basato su frame e indice detection
-                                # 9000000 è un offset sicuro per non sovrascrivere ID reali
+                                # Generate a unique ID based on frame and detection index
+                                # 9000000 is a safe offset to not overwrite real IDs
                                 tid = 9000000 + (idx * 1000) + i
                                 has_untracked = True
                             
@@ -505,13 +553,13 @@ class IdentityView:  # <--- CAMBIATO NOME
             
             if has_untracked:
                 self.hide_short_var.set(False)
-                print("Info: Rilevate detection non tracciate (ID -1). 'Nascondi brevi' disattivato per mostrare i singoli frame.")
+                print("Info: Untracked detections detected (ID -1). 'Hide short' disabled to show individual frames.")
             
         self.refresh_tree(); self.show_frame()
 
     def load_mapping(self):
         if not self.tracks:
-            messagebox.showwarning("Attenzione", "Carica prima i dati video e pose (YOLO).")
+            messagebox.showwarning("Warning", "Load video and pose data before loading an identity mapping.")
             return
 
         f = filedialog.askopenfilename(filetypes=[("Identity JSON", "*.json")])
@@ -532,7 +580,7 @@ class IdentityView:  # <--- CAMBIATO NOME
                     if role not in self.cast and role != "Ignore":
                         new_roles.add(role)
             
-            # Aggiungi nuovi ruoli al cast se non esistono
+            # Add new roles to the cast if they don't exist
             for role in new_roles:
                 self.cast[role] = {"color": (random.randint(50, 200), random.randint(50, 200), random.randint(50, 200))}
             
@@ -540,14 +588,14 @@ class IdentityView:  # <--- CAMBIATO NOME
             self.refresh_tree()
             self.show_frame()
             
-            # Aggiorna context
+            # Update context
             if self.context:
                 self.context.identity_map_path = f
                 
-            messagebox.showinfo("Caricato", f"Ripristinate {loaded_count} assegnazioni.\nNuovi ruoli aggiunti: {len(new_roles)}")
+            messagebox.showinfo("Loaded", f"Restored {loaded_count} assignments.\nNew roles added: {len(new_roles)}")
                 
         except Exception as e:
-            messagebox.showerror("Errore", f"Impossibile caricare il file:\n{e}")
+            messagebox.showerror("Error", f"Unable to load the file:\n{e}")
 
     def save_mapping(self):
         if not self.json_path: return
@@ -558,9 +606,9 @@ class IdentityView:  # <--- CAMBIATO NOME
         else:
             out = self.json_path.replace(".json.gz", "_identity.json")
 
-        # --- FIX CRITICO: Usa id_lineage invece di tracks ---
-        # Questo assicura che se ID 10 è stato unito a ID 5, 
-        # nel JSON finisca anche "10": "RuoloDi5", non solo "5": "RuoloDi5".
+        # --- CRITICAL FIX: Use id_lineage instead of tracks ---
+        # This ensures that if ID 10 was merged into ID 5, 
+        # the JSON will also include "10": "RoleOf5", not just "5": "RoleOf5".
         mapping = {}
         for original_id, current_master in self.id_lineage.items():
             if current_master in self.tracks:
@@ -573,10 +621,10 @@ class IdentityView:  # <--- CAMBIATO NOME
 
         if self.context:
             self.context.identity_map_path = out
-            print(f"CONTEXT: Identity Map aggiornata -> {out}")
+            print(f"CONTEXT: Identity Map updated -> {out}")
 
         count = len(mapping)
-        messagebox.showinfo("Fatto", f"Mappati {count} ID (inclusi ID storici fusi).\nSalvato in: {out}")
+        messagebox.showinfo("Done", f"Mapped {count} IDs (including merged historical IDs).\nSaved to: {out}")
 
     def refresh_cast_list(self):
         self.list_cast.delete(0, tk.END)
@@ -586,7 +634,7 @@ class IdentityView:  # <--- CAMBIATO NOME
             self.list_cast.itemconfig(self.list_cast.size()-1, bg='#{:02x}{:02x}{:02x}'.format(r,g,b))
             
     def add_person(self):
-        n = simpledialog.askstring("Nuovo", "Nome:")
+        n = simpledialog.askstring("New", "Name:")
         if n: self.cast[n] = {"color":(random.randint(50,200),random.randint(50,200),random.randint(50,200))}; self.refresh_cast_list()
     
     def remove_person(self):
@@ -617,12 +665,12 @@ class IdentityView:  # <--- CAMBIATO NOME
         if i:
             if i not in self.tree.selection(): self.tree.selection_set(i)
             self.context_menu.delete(0, tk.END)
-            for p in self.cast: self.context_menu.add_command(label=f"Assegna a {p}", command=lambda n=p: self.assign_sel(n))
+            for p in self.cast: self.context_menu.add_command(label=f"Assign to {p}", command=lambda n=p: self.assign_sel(n))
             self.context_menu.add_separator()
-            self.context_menu.add_command(label="Rimuovi Assegnazione", command=lambda: self.assign_sel("Ignore"))
+            self.context_menu.add_command(label="Remove Assignment", command=lambda: self.assign_sel("Ignore"))
             self.context_menu.add_separator()
-            self.context_menu.add_command(label="🔗 Unisci Selezionati", command=self.manual_merge)
-            self.context_menu.add_command(label="✂️ Dividi al Frame Corrente", command=self.split_track_at_current_frame)
+            self.context_menu.add_command(label="🔗 Merge Selected", command=self.manual_merge)
+            self.context_menu.add_command(label="✂️ Split at Current Frame", command=self.split_track_at_current_frame)
             self.context_menu.post(e.x_root, e.y_root)
 
     def assign_sel(self, r):
