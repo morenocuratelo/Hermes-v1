@@ -7,6 +7,103 @@ import os
 import random
 import math
 from PIL import Image, ImageTk
+import pickle
+import tempfile
+import shutil
+import time
+import threading
+import queue
+
+class HistoryManager:
+    def __init__(self, max_history=20):
+        self.max_history = max_history
+        self.temp_dir = tempfile.mkdtemp(prefix="hermes_history_")
+        self.undo_stack = []
+        self.redo_stack = []
+        self.current_state_file = None
+
+    def push_state(self, data):
+        # Create unique filename
+        filename = os.path.join(self.temp_dir, f"state_{time.time_ns()}.pkl")
+        
+        # Serializza data
+        with open(filename, 'wb') as f:
+            pickle.dump(data, f)
+            
+        # Manage stacks
+        if self.current_state_file:
+            self.undo_stack.append(self.current_state_file)
+            
+        self.current_state_file = filename
+        
+        # Clear redo stack and delete associated files
+        for f in self.redo_stack:
+            self._delete_file(f)
+        self.redo_stack = []
+        
+        # Enforce max history
+        if len(self.undo_stack) > self.max_history:
+            oldest = self.undo_stack.pop(0)
+            self._delete_file(oldest)
+
+    def undo(self):
+        if not self.undo_stack:
+            return None
+            
+        # Move current to redo
+        if self.current_state_file:
+            self.redo_stack.append(self.current_state_file)
+            
+        # Pop from undo
+        prev_file = self.undo_stack.pop()
+        self.current_state_file = prev_file
+        
+        return self._load_file(prev_file)
+
+    def redo(self):
+        if not self.redo_stack:
+            return None
+            
+        # Move current to undo
+        if self.current_state_file:
+            self.undo_stack.append(self.current_state_file)
+            
+        # Pop from redo
+        next_file = self.redo_stack.pop()
+        self.current_state_file = next_file
+        
+        return self._load_file(next_file)
+
+    def clear(self):
+        self.undo_stack = []
+        self.redo_stack = []
+        self.current_state_file = None
+        # Clean directory contents
+        if os.path.exists(self.temp_dir):
+            for f in os.listdir(self.temp_dir):
+                self._delete_file(os.path.join(self.temp_dir, f))
+
+    def _load_file(self, filepath):
+        try:
+            with open(filepath, 'rb') as f:
+                return pickle.load(f)
+        except Exception as e:
+            print(f"History Load Error: {e}")
+            return None
+            
+    def _delete_file(self, filepath):
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+        except OSError:
+            pass
+            
+    def __del__(self):
+        try:
+            if os.path.exists(self.temp_dir):
+                shutil.rmtree(self.temp_dir)
+        except:
+            pass
 
 class IdentityView:  # <--- CAMBIATO NOME
     def __init__(self, parent, context): # <--- NUOVI ARGOMENTI
@@ -23,6 +120,8 @@ class IdentityView:  # <--- CAMBIATO NOME
         
         self.tracks = {} 
         self.id_lineage = {} 
+        self.history = HistoryManager()
+        self.load_queue = queue.Queue()
         
         # --- PARAMETRI CONFIGURABILI (Invariati) ---
         self.param_lookahead = 15      
@@ -54,6 +153,15 @@ class IdentityView:  # <--- CAMBIATO NOME
         if self.context.video_path and self.context.pose_data_path:
             self.load_data_direct(self.context.video_path, self.context.pose_data_path)
 
+        # --- AUTOSAVE INIT ---
+        self.AUTOSAVE_INTERVAL_MS = 300000 # 5 minutes
+        self.AUTOSAVE_FILENAME = "hermes_autosave_identity.json"
+        self._check_for_autosave()
+        self._start_autosave_loop()
+        
+        # Cleanup on exit
+        self.parent.winfo_toplevel().protocol("WM_DELETE_WINDOW", self._on_close)
+
     def _setup_ui(self):
         # Header visivo
         tk.Label(self.parent, text="2. Identity Assignment", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 10), anchor="w")
@@ -83,6 +191,10 @@ class IdentityView:  # <--- CAMBIATO NOME
         # 2. GESTIONE (DX)
         right = tk.Frame(main, padx=5, pady=5)
         main.add(right, minsize=450)
+        self.right_panel = right
+
+        # Progress Bar (Hidden)
+        self.progress = ttk.Progressbar(right, mode='indeterminate')
 
         # A. CAST
         lbl_cast = tk.LabelFrame(right, text="1. Cast (Persone)", padx=5, pady=5)
@@ -158,6 +270,7 @@ class IdentityView:  # <--- CAMBIATO NOME
         # Assignment 1-9
         for i in range(1, 10):
             root.bind(str(i), self._on_number)
+        root.bind("<Control-z>", self.perform_undo)
 
     def _is_hotkey_safe(self):
         focused = self.parent.focus_get()
@@ -194,6 +307,95 @@ class IdentityView:  # <--- CAMBIATO NOME
             if 0 <= idx < self.list_cast.size() and self.tree.selection():
                 self.assign_sel(self.list_cast.get(idx))
         except ValueError: pass
+
+    def _snapshot(self):
+        self.history.push_state(self.tracks)
+
+    def perform_undo(self, event=None):
+        prev_state = self.history.undo()
+        if prev_state is not None:
+            self.tracks = prev_state
+            # Rebuild lineage from tracks to maintain consistency
+            self.id_lineage = {}
+            for tid, data in self.tracks.items():
+                self.id_lineage[tid] = tid
+                for merged in data.get('merged_from', []):
+                    self.id_lineage[merged] = tid
+            self.refresh_tree()
+            self.show_frame()
+            print("Undo performed.")
+
+    def _start_autosave_loop(self):
+        try:
+            self.parent.after(self.AUTOSAVE_INTERVAL_MS, self._perform_autosave)
+        except Exception:
+            pass # Widget destroyed
+
+    def _perform_autosave(self):
+        if not self.tracks:
+            self._start_autosave_loop()
+            return
+
+        # Determine path
+        if self.context and self.context.project_path:
+            save_path = os.path.join(self.context.project_path, self.AUTOSAVE_FILENAME)
+        else:
+            save_path = self.AUTOSAVE_FILENAME
+
+        self.AUTOSAVE_FILENAME
+        save_path = self._get_autosave_path()
+
+        def save_task(data, filepath):
+            try:
+                tmp_path = filepath + ".tmp"
+                with open(tmp_path, 'w') as f:
+                    json.dump(data, f)
+                if os.path.exists(filepath): os.remove(filepath)
+                os.rename(tmp_path, filepath)
+                print(f"[Autosave] Saved to {filepath}")
+            except Exception as e:
+                print(f"[Autosave] Error: {e}")
+
+        threading.Thread(target=save_task, args=(self.tracks.copy(), save_path), daemon=True).start()
+        self._start_autosave_loop()
+
+    def _get_autosave_path(self):
+        if self.context and self.context.project_path:
+            return os.path.join(self.context.project_path, self.AUTOSAVE_FILENAME)
+        return self.AUTOSAVE_FILENAME
+
+    def _check_for_autosave(self):
+        path = self._get_autosave_path()
+        if os.path.exists(path):
+            if messagebox.askyesno("Recovery", "Found an autosave file from a previous session.\nDo you want to restore it?"):
+                try:
+                    with open(path, 'r') as f:
+                        data = json.load(f)
+                    # JSON keys are strings, convert back to int
+                    self.tracks = {int(k): v for k, v in data.items()}
+                    
+                    # Rebuild lineage
+                    self.id_lineage = {}
+                    for tid, d in self.tracks.items():
+                        self.id_lineage[tid] = tid
+                        for merged in d.get('merged_from', []):
+                            self.id_lineage[merged] = tid
+                            
+                    self.refresh_tree()
+                    self.show_frame()
+                    print(f"Restored autosave: {path}")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Corrupt autosave file: {e}")
+            else:
+                try: os.remove(path)
+                except: pass
+
+    def _on_close(self):
+        path = self._get_autosave_path()
+        if os.path.exists(path):
+            try: os.remove(path)
+            except: pass
+        self.parent.winfo_toplevel().destroy()
 
     # --- NEW FEATURE: SETTINGS DIALOG ---
     def open_settings_dialog(self):
@@ -244,6 +446,7 @@ class IdentityView:  # <--- CAMBIATO NOME
     def absorb_noise_logic(self):
         """Supervised Noise Absorption using configurable parameters."""
         if not messagebox.askyesno("Confirm", f"Absorb noise (Dist < {self.param_noise_dist}px)?"): return
+        self._snapshot()
         
         main_tracks = [tid for tid, d in self.tracks.items() if d['role'] in self.cast]
         candidates = [tid for tid, d in self.tracks.items() if d['role'] not in self.cast]
@@ -308,6 +511,7 @@ class IdentityView:  # <--- CAMBIATO NOME
 
     def auto_stitch(self):
         """Unsupervised Auto-Stitching using configurable parameters."""
+        self._snapshot()
         # Retrieve parameters
         p_win = self.param_lookahead
         p_time = self.param_time_gap
@@ -376,6 +580,7 @@ class IdentityView:  # <--- CAMBIATO NOME
     def manual_merge(self):
         sel = self.tree.selection()
         if len(sel) < 2: return
+        self._snapshot()
         ids = sorted([int(x) for x in sel])
         master = ids[0]
         role = self.tracks[master]['role']
@@ -442,6 +647,8 @@ class IdentityView:  # <--- CAMBIATO NOME
                "NO = The NEXT part (from the cursor onwards)")
         
         keep_head = messagebox.askyesno("Confirm Split", msg)
+
+        self._snapshot()
 
         # 3. ID Generation & State Update
         new_track_id = max(self.tracks.keys()) + 1 if self.tracks else 1
@@ -522,40 +729,75 @@ class IdentityView:  # <--- CAMBIATO NOME
             self.slider.config(to=self.total_frames-1)
         
         if self.json_path and os.path.exists(self.json_path):
-            self.tracks = {}; self.id_lineage = {}
+            # Async Load
+            siblings = [c for c in self.right_panel.winfo_children() if c != self.progress]
+            if siblings:
+                self.progress.pack(fill=tk.X, pady=5, side=tk.TOP, before=siblings[0])
+            else:
+                self.progress.pack(fill=tk.X, pady=5, side=tk.TOP)
+            self.progress.start(10)
+            
+            threading.Thread(target=self._load_json_thread, args=(self.json_path,), daemon=True).start()
+            self.parent.after(100, self._check_load_queue)
+        else:
+            self.refresh_tree()
+            self.show_frame()
+
+    def _load_json_thread(self, path):
+        try:
+            tracks = {}
+            id_lineage = {}
             has_untracked = False
 
-            try:
-                with gzip.open(self.json_path, 'rt', encoding='utf-8') as f:
-                    for line in f:
-                        d = json.loads(line)
-                        idx = d['f_idx']
-                        for i, det in enumerate(d['det']):
-                            tid = det.get('track_id')
-                            
-                            if tid is None: tid = -1
-                            tid = int(tid)
-                            
-                            # If ID is -1 (Tracker off), generate a unique ID to avoid incorrect merging
-                            if tid == -1:
-                                # Generate a unique ID based on frame and detection index
-                                # 9000000 is a safe offset to not overwrite real IDs
-                                tid = 9000000 + (idx * 1000) + i
-                                has_untracked = True
-                            
-                            if tid not in self.tracks:
-                                self.tracks[tid] = {'frames':[], 'boxes':[], 'role':'Ignore', 'merged_from':[tid]}
-                                self.id_lineage[tid] = tid
-                            self.tracks[tid]['frames'].append(idx)
-                            b=det['box']
-                            self.tracks[tid]['boxes'].append([b['x1'],b['y1'],b['x2'],b['y2']])
-            except Exception as e: messagebox.showerror("Err", str(e))
+            with gzip.open(path, 'rt', encoding='utf-8') as f:
+                for line in f:
+                    d = json.loads(line)
+                    idx = d['f_idx']
+                    for i, det in enumerate(d['det']):
+                        tid = det.get('track_id')
+                        
+                        if tid is None: tid = -1
+                        tid = int(tid)
+                        
+                        if tid == -1:
+                            tid = 9000000 + (idx * 1000) + i
+                            has_untracked = True
+                        
+                        if tid not in tracks:
+                            tracks[tid] = {'frames':[], 'boxes':[], 'role':'Ignore', 'merged_from':[tid]}
+                            id_lineage[tid] = tid
+                        tracks[tid]['frames'].append(idx)
+                        b=det['box']
+                        tracks[tid]['boxes'].append([b['x1'],b['y1'],b['x2'],b['y2']])
             
-            if has_untracked:
-                self.hide_short_var.set(False)
-                print("Info: Untracked detections detected (ID -1). 'Hide short' disabled to show individual frames.")
+            self.load_queue.put(("success", tracks, id_lineage, has_untracked))
+        except Exception as e:
+            self.load_queue.put(("error", str(e)))
+
+    def _check_load_queue(self):
+        try:
+            msg = self.load_queue.get_nowait()
+            status = msg[0]
             
-        self.refresh_tree(); self.show_frame()
+            self.progress.stop()
+            self.progress.pack_forget()
+            
+            if status == "success":
+                _, tracks, lineage, has_untracked = msg
+                self.tracks = tracks
+                self.id_lineage = lineage
+                
+                if has_untracked:
+                    self.hide_short_var.set(False)
+                    print("Info: Untracked detections detected (ID -1). 'Hide short' disabled.")
+                
+                self.refresh_tree()
+                self.show_frame()
+            elif status == "error":
+                messagebox.showerror("Error", f"Failed to load JSON: {msg[1]}")
+                
+        except queue.Empty:
+            self.parent.after(100, self._check_load_queue)
 
     def load_mapping(self):
         if not self.tracks:

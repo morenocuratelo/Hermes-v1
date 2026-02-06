@@ -45,12 +45,14 @@ class TextRedirector(object):
         self.tag = tag
 
     def write(self, str):
+        self.widget.after(0, self._write_safe, str)
+
+    def _write_safe(self, str):
         try:
             self.widget.configure(state="normal")
             self.widget.insert("end", str, (self.tag,))
             self.widget.see("end")
             self.widget.configure(state="disabled")
-            self.widget.update_idletasks()
         except tk.TclError:
             pass
 

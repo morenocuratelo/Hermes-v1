@@ -32,11 +32,11 @@ This document outlines specific tasks to improve the User Experience (UX) of the
 **Reflections:**
 *   **Refinement:** Instead of deep-copying the entire state (RAM heavy), consider a **Delta Approach** (record only changed track IDs) or **Disk-based History** (serialize undo stack to temp pickle file).
 
-- [ ] **IdentityView (`hermes_entity.py`)**
-    - [ ] Create a `HistoryManager` class to manage a stack of states.
-    - [ ] Implement `snapshot()` (or delta recording) before: `manual_merge`, `auto_stitch`, `absorb_noise_logic`, `split_track_at_current_frame`.
-    - [ ] Hook `snapshot()` into: `manual_merge`, `auto_stitch`, `absorb_noise_logic`, `split_track_at_current_frame`.
-    - [ ] Add `Ctrl+Z` (Undo) binding to restore the previous state.
+- [x] **IdentityView (`hermes_entity.py`)**
+    - [x] Create a `HistoryManager` class to manage a stack of states.
+    - [x] Implement `snapshot()` (or delta recording) before: `manual_merge`, `auto_stitch`, `absorb_noise_logic`, `split_track_at_current_frame`.
+    - [x] Hook `snapshot()` into: `manual_merge`, `auto_stitch`, `absorb_noise_logic`, `split_track_at_current_frame`.
+    - [x] Add `Ctrl+Z` (Undo) binding to restore the previous state.
 
 ## 2. Visual Feedback & Responsiveness
 
@@ -96,6 +96,10 @@ This document outlines specific tasks to improve the User Experience (UX) of the
 - [ ] **Icons**
     - [ ] Replace text-based buttons (e.g., "⏯", "📂", "🚀") with consistent PNG/SVG icons (Play, Pause, Folder, Rocket).
 
+- [ ] ** Suggestion**
+    - [ ] Task 3.1: Theming & Modernization
+        Osservazione: Non vedo importazioni di librerie di temi (es. ttkbootstrap) in questi file, ma vedo ancora molti colori hardcoded stile "Windows 95" (es. bg="black", bg="white", bg="#4CAF50").
+        Consiglio: Se applicherai un tema globale in hermes_unified.py, dovrai rimuovere questi parametri bg=... dai widget standard, altrimenti "bucheranno" il tema scuro creando rettangoli bianchi stonati.
 ## 4. Persistence & Onboarding
 
 ### 4.1 Configuration Management
@@ -125,9 +129,9 @@ This document outlines specific tasks to improve the User Experience (UX) of the
 **Context:** Research software is prone to crashes (OOM, CUDA).
 **Goal:** Prevent data loss.
 
-- [ ] **IdentityView (`hermes_entity.py`)**
-    - [ ] Implement background Auto-Save timer (2-5 mins) to temp file (`_autosave_identity.json`).
-    - [ ] On startup, check for temp file and prompt to restore.
+- [x] **IdentityView (`hermes_entity.py`)**
+    - [x] Implement background Auto-Save timer (2-5 mins) to temp file (`_autosave_identity.json`).
+    - [x] On startup, check for temp file and prompt to restore.
 
 ### 5.2 Input Validation & "Pre-Flight Checks"
 **Context:** Mismatched files (FPS, Duration, Coordinates) cause late errors.
