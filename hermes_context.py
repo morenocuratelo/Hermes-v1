@@ -7,8 +7,8 @@ class AppContext:
     def __init__(self):
         # 1. Hardware Initialization
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.gpu_name = torch.cuda.get_device_name(0) if self.device == "cuda" else "Nessuna GPU"
-        print(f"SISTEMA: Context inizializzato su {self.device} ({self.gpu_name})")
+        self.gpu_name = torch.cuda.get_device_name(0) if self.device == "cuda" else "No GPU"
+        print(f"SYSTEM: Context initialized on {self.device} ({self.gpu_name})")
 
         # 2. Project Management
         self.project_path = None
@@ -39,7 +39,7 @@ class AppContext:
         """Aggiorna il percorso video nel contesto."""
         if path and os.path.exists(path):
             self.video_path = path
-            print(f"CONTESTO: Video aggiornato -> {path}")
+            print(f"CONTEXT: Video updated -> {path}")
 
     def initialize_project(self, folder_path):
         """Crea la struttura delle cartelle e i file di default se non esistono."""
@@ -57,7 +57,7 @@ class AppContext:
         for key, path in self.paths.items():
             if key != "root" and not os.path.exists(path):
                 os.makedirs(path)
-                print(f"Creata cartella: {path}")
+                print(f"Created folder: {path}")
 
         # Crea Profili Default (Se vuoti)
         self._create_default_toi_profile()
@@ -66,7 +66,7 @@ class AppContext:
         # Scansiona file esistenti
         self._scan_existing_files()
         
-        print(f"PROGETTO INIZIALIZZATO: {folder_path}")
+        print(f"PROJECT INITIALIZED: {folder_path}")
 
     def import_file(self, source_path, category="input"):
         """Copia un file nella cartella del progetto."""
@@ -83,10 +83,10 @@ class AppContext:
             
         try:
             shutil.copy2(source_path, dest_path)
-            print(f"Importato: {filename}")
+            print(f"Imported: {filename}")
             return dest_path
         except Exception as e:
-            print(f"Errore importazione {filename}: {e}")
+            print(f"Import error {filename}: {e}")
             return source_path
 
     def _create_default_toi_profile(self):
@@ -106,7 +106,7 @@ class AppContext:
         if not self.project_path or not os.path.exists(self.project_path):
             return
 
-        print(f"CONTEXT: Scansione ricorsiva in {self.project_path}...")
+        print(f"CONTEXT: Recursive scan in {self.project_path}...")
 
         for root, _, files in os.walk(self.project_path):
             for f in files:
@@ -116,39 +116,39 @@ class AppContext:
                 # 1. Video
                 if lower.endswith(('.mp4', '.avi', '.mov')):
                     self.video_path = f_path
-                    print(f"CONTEXT: Video rilevato -> {f}")
+                    print(f"CONTEXT: Video detected -> {f}")
                 
                 # 2. Pose Data (YOLO)
                 elif lower.endswith('_yolo.json.gz'):
                     self.pose_data_path = f_path
-                    print(f"CONTEXT: Pose Data rilevato -> {f}")
+                    print(f"CONTEXT: Pose Data detected -> {f}")
 
                 # 3. Gaze Data (Tobii) - .gz ma non yolo
                 elif lower.endswith('.gz') and not lower.endswith('_yolo.json.gz'):
                     self.gaze_data_path = f_path
-                    print(f"CONTEXT: Gaze Data rilevato -> {f}")
+                    print(f"CONTEXT: Gaze Data detected -> {f}")
 
                 # 4. Identity Map
                 elif lower.endswith('_identity.json'):
                     self.identity_map_path = f_path
-                    print(f"CONTEXT: Identity Map rilevata -> {f}")
+                    print(f"CONTEXT: Identity Map detected -> {f}")
 
                 # 5. TOI
                 elif lower.endswith('.tsv'):
                     self.toi_path = f_path
-                    print(f"CONTEXT: TOI rilevati -> {f}")
+                    print(f"CONTEXT: TOI detected -> {f}")
 
                 # 6. Mapped CSV
                 elif 'mapped' in lower and lower.endswith('.csv'):
                     self.mapped_csv_path = f_path
-                    print(f"CONTEXT: Mapped CSV rilevato -> {f}")
+                    print(f"CONTEXT: Mapped CSV detected -> {f}")
 
                 # 7. AOI CSV
                 elif lower.endswith('.csv') and 'results' not in lower:
                     self.aoi_csv_path = f_path
-                    print(f"CONTEXT: AOI CSV rilevato -> {f}")
+                    print(f"CONTEXT: AOI CSV detected -> {f}")
 
                 # 8. YOLO Model
                 elif lower.endswith('.pt'):
                     self.yolo_model_path = f_path
-                    print(f"CONTEXT: Modello YOLO rilevato -> {f}")
+                    print(f"CONTEXT: YOLO Model detected -> {f}")

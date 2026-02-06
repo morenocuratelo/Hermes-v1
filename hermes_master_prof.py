@@ -7,7 +7,7 @@ import os
 class ProfileWizard:
     def __init__(self, root):
         self.root = root
-        self.root.title("Universal Profile Generator - Lab Modigliani")
+        self.root.title("Universal Profile Generator")
         self.root.geometry("900x850")
         
         # Variabili Dati Caricati
@@ -41,105 +41,105 @@ class ProfileWizard:
     def _build_header(self):
         f = tk.Frame(self.scrollable_frame, pady=10, padx=20)
         f.pack(fill=tk.X)
-        tk.Label(f, text="Generatore Profili Universale", font=("Segoe UI", 16, "bold")).pack()
+        tk.Label(f, text="Universal Profile Generator", font=("Segoe UI", 16, "bold")).pack()
         
-        tk.Label(f, text="Nome Profilo:").pack(anchor="w")
+        tk.Label(f, text="Profile Name:").pack(anchor="w")
         self.entry_name = tk.Entry(f, width=50)
         self.entry_name.pack(anchor="w")
-        self.entry_name.insert(0, "Nuovo Esperimento")
+        self.entry_name.insert(0, "New Experiment")
         
-        tk.Label(f, text="Descrizione:").pack(anchor="w")
+        tk.Label(f, text="Description:").pack(anchor="w")
         self.entry_desc = tk.Entry(f, width=80)
         self.entry_desc.pack(anchor="w")
 
     def _build_data_loader(self):
-        lf = tk.LabelFrame(self.scrollable_frame, text="1. Carica Dati Esempio (Per popolare i menu)", padx=10, pady=10)
+        lf = tk.LabelFrame(self.scrollable_frame, text="1. Load Sample Data (To populate menus)", padx=10, pady=10)
         lf.pack(fill=tk.X, padx=20, pady=10)
         
         # JSON Loader
-        tk.Button(lf, text="Carica User Event Tobii (.json)", command=self.load_json_sample).grid(row=0, column=0, padx=5, sticky="w")
-        self.lbl_json_status = tk.Label(lf, text="Nessun file caricato", fg="red")
+        tk.Button(lf, text="Load Tobii User Event (.json)", command=self.load_json_sample).grid(row=0, column=0, padx=5, sticky="w")
+        self.lbl_json_status = tk.Label(lf, text="No file loaded", fg="red")
         self.lbl_json_status.grid(row=0, column=1, padx=5)
 
         # CSV Loader
-        tk.Button(lf, text="Carica Results Matlab (.csv)", command=self.load_csv_sample).grid(row=1, column=0, padx=5, sticky="w", pady=5)
-        self.lbl_csv_status = tk.Label(lf, text="Nessun file caricato", fg="red")
+        tk.Button(lf, text="Load Matlab Results (.csv)", command=self.load_csv_sample).grid(row=1, column=0, padx=5, sticky="w", pady=5)
+        self.lbl_csv_status = tk.Label(lf, text="No file loaded", fg="red")
         self.lbl_csv_status.grid(row=1, column=1, padx=5)
 
     def _build_sync_logic(self):
-        lf = tk.LabelFrame(self.scrollable_frame, text="2. Logica di Sincronizzazione (Anchor)", padx=10, pady=10)
+        lf = tk.LabelFrame(self.scrollable_frame, text="2. Synchronization Logic (Anchor)", padx=10, pady=10)
         lf.pack(fill=tk.X, padx=20, pady=10)
 
-        tk.Label(lf, text="A. Quale EVENTO Tobii è il punto di sync?").grid(row=0, column=0, sticky="w")
+        tk.Label(lf, text="A. Which Tobii EVENT is the sync point?").grid(row=0, column=0, sticky="w")
         self.combo_tobii_event = ttk.Combobox(lf, state="readonly", width=40)
         self.combo_tobii_event.grid(row=1, column=0, padx=5, pady=(0,10))
 
-        tk.Label(lf, text="B. Quale COLONNA Matlab corrisponde a quell'evento?").grid(row=0, column=1, sticky="w")
+        tk.Label(lf, text="B. Which Matlab COLUMN corresponds to that event?").grid(row=0, column=1, sticky="w")
         self.combo_matlab_anchor = ttk.Combobox(lf, state="readonly", width=40)
         self.combo_matlab_anchor.grid(row=1, column=1, padx=5, pady=(0,10))
 
-        tk.Label(lf, text="C. Offset temporale (Secondi da aggiungere/togliere):").grid(row=2, column=0, sticky="w")
+        tk.Label(lf, text="C. Time Offset (Seconds to add/remove):").grid(row=2, column=0, sticky="w")
         self.entry_offset = tk.Entry(lf, width=10)
         self.entry_offset.grid(row=3, column=0, sticky="w", padx=5)
         self.entry_offset.insert(0, "0.0")
-        tk.Label(lf, text="(Es: metti -60.0 se Start avviene 60s prima del marker)").grid(row=3, column=1, sticky="w")
+        tk.Label(lf, text="(Ex: put -60.0 if Start happens 60s before marker)").grid(row=3, column=1, sticky="w")
 
     def _build_structure_logic(self):
-        lf = tk.LabelFrame(self.scrollable_frame, text="3. Struttura Trial & Sequenza", padx=10, pady=10)
+        lf = tk.LabelFrame(self.scrollable_frame, text="3. Trial Structure & Sequence", padx=10, pady=10)
         lf.pack(fill=tk.X, padx=20, pady=10)
 
         # Condition Column
-        tk.Label(lf, text="Colonna che contiene il nome della Condizione (es. Condition):").pack(anchor="w")
+        tk.Label(lf, text="Column containing Condition name (e.g. Condition):").pack(anchor="w")
         self.combo_cond_col = ttk.Combobox(lf, state="readonly", width=40)
         self.combo_cond_col.pack(anchor="w", pady=(0, 10))
 
         # Sequence Builder (Dual Listbox)
-        tk.Label(lf, text="Costruisci la sequenza temporale (Sposta le colonne da SX a DX nell'ordine corretto):").pack(anchor="w")
+        tk.Label(lf, text="Build time sequence (Move columns from Left to Right in correct order):").pack(anchor="w")
         
         frame_seq = tk.Frame(lf)
         frame_seq.pack(fill=tk.X)
 
         # Left: Available
-        tk.Label(frame_seq, text="Colonne Disponibili").grid(row=0, column=0)
+        tk.Label(frame_seq, text="Available Columns").grid(row=0, column=0)
         self.lb_avail = tk.Listbox(frame_seq, selectmode=tk.EXTENDED, height=10, width=30)
         self.lb_avail.grid(row=1, column=0)
 
         # Buttons
         btn_frame = tk.Frame(frame_seq)
         btn_frame.grid(row=1, column=1, padx=10)
-        tk.Button(btn_frame, text="Aggiungi ->", command=self.add_to_sequence).pack(fill=tk.X, pady=5)
-        tk.Button(btn_frame, text="<- Rimuovi", command=self.remove_from_sequence).pack(fill=tk.X, pady=5)
+        tk.Button(btn_frame, text="Add ->", command=self.add_to_sequence).pack(fill=tk.X, pady=5)
+        tk.Button(btn_frame, text="<- Remove", command=self.remove_from_sequence).pack(fill=tk.X, pady=5)
 
         # Right: Selected
-        tk.Label(frame_seq, text="Sequenza Selezionata (Ordine Temporale)").grid(row=0, column=2)
+        tk.Label(frame_seq, text="Selected Sequence (Time Order)").grid(row=0, column=2)
         self.lb_selected = tk.Listbox(frame_seq, selectmode=tk.EXTENDED, height=10, width=30)
         self.lb_selected.grid(row=1, column=2)
 
     def _build_fixed_phases(self):
-        lf = tk.LabelFrame(self.scrollable_frame, text="4. Fasi Fisse Extra (es. ITI)", padx=10, pady=10)
+        lf = tk.LabelFrame(self.scrollable_frame, text="4. Extra Fixed Phases (e.g. ITI)", padx=10, pady=10)
         lf.pack(fill=tk.X, padx=20, pady=10)
 
         # Anchor selection
-        tk.Label(lf, text="Punto di partenza per le fasi fisse:").grid(row=0, column=0, sticky="w")
+        tk.Label(lf, text="Start point for fixed phases:").grid(row=0, column=0, sticky="w")
         self.combo_fixed_anchor = ttk.Combobox(lf, state="readonly", width=30)
         self.combo_fixed_anchor.grid(row=0, column=1, sticky="w")
         # Popolato dopo con "auto" + colonne
 
         # List of fixed phases
         self.tree_fixed = ttk.Treeview(lf, columns=("name", "duration"), show="headings", height=4)
-        self.tree_fixed.heading("name", text="Nome Fase")
-        self.tree_fixed.heading("duration", text="Durata (s)")
+        self.tree_fixed.heading("name", text="Phase Name")
+        self.tree_fixed.heading("duration", text="Duration (s)")
         self.tree_fixed.grid(row=1, column=0, columnspan=3, sticky="ew", pady=10)
 
         btn_f = tk.Frame(lf)
         btn_f.grid(row=2, column=0, columnspan=3)
-        tk.Button(btn_f, text="Aggiungi Fase Fissa...", command=self.add_fixed_phase_dialog).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_f, text="Rimuovi Selezionata", command=self.remove_fixed_phase).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_f, text="Add Fixed Phase...", command=self.add_fixed_phase_dialog).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_f, text="Remove Selected", command=self.remove_fixed_phase).pack(side=tk.LEFT, padx=5)
 
     def _build_save_section(self):
         f = tk.Frame(self.scrollable_frame, pady=20)
         f.pack(fill=tk.X)
-        tk.Button(f, text="SALVA PROFILO JSON", bg="#4CAF50", fg="white", font=("Arial", 14, "bold"), height=2, command=self.save_profile).pack(fill=tk.X, padx=50)
+        tk.Button(f, text="SAVE JSON PROFILE", bg="#4CAF50", fg="white", font=("Arial", 14, "bold"), height=2, command=self.save_profile).pack(fill=tk.X, padx=50)
 
     # --- LOGICA ---
 
@@ -162,9 +162,9 @@ class ProfileWizard:
             self.combo_tobii_event['values'] = self.loaded_json_events
             if self.loaded_json_events: self.combo_tobii_event.current(0)
             
-            self.lbl_json_status.config(text=f"OK! Trovati {len(labels)} eventi.", fg="green")
+            self.lbl_json_status.config(text=f"OK! Found {len(labels)} events.", fg="green")
         except Exception as e:
-            messagebox.showerror("Errore JSON", str(e))
+            messagebox.showerror("JSON Error", str(e))
 
     def load_csv_sample(self):
         path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv"), ("Text", "*.txt"), ("All", "*.*")])
@@ -200,15 +200,15 @@ class ProfileWizard:
                 self.lb_avail.insert(tk.END, c)
             
             # 4. Popola Anchor Fasi Fisse (Sezione 4)
-            fixed_opts = ["auto (Fine ultima fase)"] + self.loaded_csv_columns
+            fixed_opts = ["auto (End of last phase)"] + self.loaded_csv_columns
             self.combo_fixed_anchor['values'] = fixed_opts
             self.combo_fixed_anchor.current(0)
 
-            self.lbl_csv_status.config(text=f"OK! Trovate {len(self.loaded_csv_columns)} colonne.", fg="green")
+            self.lbl_csv_status.config(text=f"OK! Found {len(self.loaded_csv_columns)} columns.", fg="green")
             
         except Exception as e:
             print(f"Errore caricamento CSV: {e}")
-            messagebox.showerror("Errore CSV", f"Impossibile leggere le colonne.\nErrore: {str(e)}")
+            messagebox.showerror("CSV Error", f"Cannot read columns.\nError: {str(e)}")
 
     def add_to_sequence(self):
         indices = self.lb_avail.curselection()
@@ -226,9 +226,9 @@ class ProfileWizard:
             self.lb_selected.delete(i)
 
     def add_fixed_phase_dialog(self):
-        name = simpledialog.askstring("Nuova Fase", "Nome della fase (es. ITI):")
+        name = simpledialog.askstring("New Phase", "Phase name (e.g. ITI):")
         if not name: return
-        dur = simpledialog.askfloat("Durata", "Durata in secondi (es. 10.0):")
+        dur = simpledialog.askfloat("Duration", "Duration in seconds (e.g. 10.0):")
         if dur is None: return
         self.tree_fixed.insert("", tk.END, values=(name, dur))
 
@@ -241,12 +241,12 @@ class ProfileWizard:
         # 1. Raccolta dati UI
         p_name = self.entry_name.get()
         if not p_name: 
-            messagebox.showwarning("Manca nome", "Inserisci un nome per il file.")
+            messagebox.showwarning("Missing name", "Enter a name for the file.")
             return
 
         seq_cols = list(self.lb_selected.get(0, tk.END))
         if not seq_cols:
-            messagebox.showwarning("Manca Sequenza", "Seleziona almeno due colonne per la sequenza temporale.")
+            messagebox.showwarning("Missing Sequence", "Select at least two columns for the time sequence.")
             return
 
         # Fasi fisse
@@ -293,9 +293,9 @@ class ProfileWizard:
         try:
             with open(path, 'w') as f:
                 json.dump(profile_data, f, indent=4)
-            messagebox.showinfo("Successo", f"Profilo salvato correttamente in:\n{path}")
+            messagebox.showinfo("Success", f"Profile saved successfully in:\n{path}")
         except Exception as e:
-            messagebox.showerror("Errore Salvataggio", str(e))
+            messagebox.showerror("Save Error", str(e))
 
 if __name__ == "__main__":
     root = tk.Tk()

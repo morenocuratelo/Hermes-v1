@@ -80,7 +80,7 @@ class ReviewerView:
         tk.Label(self.parent, text="5. Data Reviewer", font=("Arial", 16, "bold")).pack(pady=5)
         
         # Controlli File
-        fr_files = tk.LabelFrame(self.parent, text="Carica Dati")
+        fr_files = tk.LabelFrame(self.parent, text="Load Data")
         fr_files.pack(fill=tk.X, padx=5)
         btn_fr = tk.Frame(fr_files); btn_fr.pack(fill=tk.X)
         tk.Button(btn_fr, text="Video", command=self.load_video).pack(side=tk.LEFT)
@@ -134,8 +134,8 @@ class ReviewerView:
         try:
             self.df_tois = pd.read_csv(path, sep='\t' if path.endswith('.tsv') else ',')
             if self.cap: self.timeline.set_data(self.total_duration, self.df_tois)
-            messagebox.showinfo("OK", f"Caricati {len(self.df_tois)} TOI")
-        except Exception as e: messagebox.showerror("Err", str(e))
+            messagebox.showinfo("OK", f"Loaded {len(self.df_tois)} TOIs")
+        except Exception as e: messagebox.showerror("Error", str(e))
 
     def load_gaze(self, path=None):
         if not path: path = filedialog.askopenfilename(filetypes=[("Gaze", "*.csv")])
@@ -157,10 +157,10 @@ class ReviewerView:
                 self.gaze_t = self.df_gaze[t_col].values # Per ricerca veloce
                 self.gaze_x = self.df_gaze[x_col].values
                 self.gaze_y = self.df_gaze[y_col].values
-                messagebox.showinfo("OK", "Gaze caricato correttamente")
+                messagebox.showinfo("OK", "Gaze loaded successfully")
             else:
-                messagebox.showwarning("Attenzione", f"Colonne Gaze non trovate in: {df.columns}")
-        except Exception as e: messagebox.showerror("Err", str(e))
+                messagebox.showwarning("Warning", f"Gaze columns not found in: {df.columns}")
+        except Exception as e: messagebox.showerror("Error", str(e))
 
     def toggle_play(self):
         self.is_playing = not self.is_playing

@@ -42,21 +42,21 @@ class GazeStatsView: # <--- NOME CAMBIATO
         lf_in = tk.LabelFrame(main, text="1. File di Input", padx=10, pady=10)
         lf_in.pack(fill=tk.X, pady=5)
         
-        self._add_picker(lf_in, "File MAPPED (.csv):", self.mapped_csv_path, "*.csv")
-        self._add_picker(lf_in, "File TOI (.tsv):", self.toi_tsv_path, "*.tsv")
+        self._add_picker(lf_in, "MAPPED File (.csv):", self.mapped_csv_path, "*.csv")
+        self._add_picker(lf_in, "TOI File (.tsv):", self.toi_tsv_path, "*.tsv")
 
         # 2. Settings
-        lf_set = tk.LabelFrame(main, text="2. Impostazioni Eye-Tracker", padx=10, pady=10)
+        lf_set = tk.LabelFrame(main, text="2. Eye-Tracker Settings", padx=10, pady=10)
         lf_set.pack(fill=tk.X, pady=5)
         
-        tk.Label(lf_set, text="Frequenza Campionamento (Hz):").grid(row=0, column=0, sticky="w")
+        tk.Label(lf_set, text="Sampling Frequency (Hz):").grid(row=0, column=0, sticky="w")
         tk.Entry(lf_set, textvariable=self.gaze_freq, width=10).grid(row=0, column=1, padx=10)
-        tk.Label(lf_set, text="(Default Tobii Glasses 2/3: 50 o 100 Hz)", fg="gray").grid(row=0, column=2, sticky="w")
+        tk.Label(lf_set, text="(Default Tobii Glasses 2/3: 50 or 100 Hz)", fg="gray").grid(row=0, column=2, sticky="w")
 
         # 3. Action
-        tk.Button(main, text="GENERA REPORT STATISTICO", bg="#4CAF50", fg="white", font=("Bold", 12), height=2, command=self.run_analysis).pack(fill=tk.X, pady=20)
+        tk.Button(main, text="GENERATE STATISTICAL REPORT", bg="#4CAF50", fg="white", font=("Bold", 12), height=2, command=self.run_analysis).pack(fill=tk.X, pady=20)
         
-        self.lbl_status = tk.Label(main, text="In attesa...")
+        self.lbl_status = tk.Label(main, text="Waiting...")
         self.lbl_status.pack()
 
     def _add_picker(self, p, lbl, var, ft):
@@ -71,11 +71,11 @@ class GazeStatsView: # <--- NOME CAMBIATO
 
     def run_analysis(self):
         if not self.mapped_csv_path.get() or not self.toi_tsv_path.get():
-            messagebox.showwarning("Errore", "Seleziona entrambi i file (Mapped CSV e TOI TSV).")
+            messagebox.showwarning("Error", "Select both files (Mapped CSV and TOI TSV).")
             return
             
         try:
-            self.lbl_status.config(text="Caricamento dati...")
+            self.lbl_status.config(text="Loading data...")
             self.parent.update()
             
             # 1. Carica Dati
@@ -92,7 +92,7 @@ class GazeStatsView: # <--- NOME CAMBIATO
             
             results = []
             
-            self.lbl_status.config(text=f"Analisi di {len(df_toi)} fasi...")
+            self.lbl_status.config(text=f"Analyzing {len(df_toi)} phases...")
             self.parent.update()
             
             # 2. Loop sulle Fasi (TOI)
@@ -157,9 +157,9 @@ class GazeStatsView: # <--- NOME CAMBIATO
             
             df_res.to_csv(out_path, index=False)
             
-            self.lbl_status.config(text="Fatto.")
-            messagebox.showinfo("Analisi Completata", f"Report generato con successo:\n{out_path}\n\nOra puoi aprirlo in Excel/SPSS.")
+            self.lbl_status.config(text="Done.")
+            messagebox.showinfo("Analysis Complete", f"Report generated successfully:\n{out_path}\n\nYou can now open it in Excel/SPSS.")
             
         except Exception as e:
-            messagebox.showerror("Errore Analisi", str(e))
-            self.lbl_status.config(text="Errore.")
+            messagebox.showerror("Analysis Error", str(e))
+            self.lbl_status.config(text="Error.")

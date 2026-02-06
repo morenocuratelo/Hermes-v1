@@ -10,10 +10,10 @@ from PIL import Image, ImageTk
 
 # Mappatura Standard YOLO
 KEYPOINTS_MAP = {
-    0: "Naso", 1: "Occhio SX", 2: "Occhio DX", 3: "Orecchio SX", 4: "Orecchio DX",
-    5: "Spalla SX", 6: "Spalla DX", 7: "Gomito SX", 8: "Gomito DX",
-    9: "Polso SX", 10: "Polso DX", 11: "Anca SX", 12: "Anca DX",
-    13: "Ginocchio SX", 14: "Ginocchio DX", 15: "Caviglia SX", 16: "Caviglia DX"
+    0: "Nose", 1: "L_Eye", 2: "R_Eye", 3: "L_Ear", 4: "R_Ear",
+    5: "L_Shoulder", 6: "R_Shoulder", 7: "L_Elbow", 8: "R_Elbow",
+    9: "L_Wrist", 10: "R_Wrist", 11: "L_Hip", 12: "R_Hip",
+    13: "L_Knee", 14: "R_Knee", 15: "L_Ankle", 16: "R_Ankle"
 }
 
 class AOIProfileManager:
@@ -110,6 +110,7 @@ class RegionView:
         self.total_frames = 0
         self.fps = 30.0
         self.is_playing = False
+        self.kp_conf_thresh = tk.DoubleVar(value=0.3) # Default originale era 0.3
         
         self._setup_ui()
 
@@ -125,7 +126,7 @@ class RegionView:
 
     def _setup_ui(self):
         # Header visivo
-        tk.Label(self.parent, text="3. Region Definition (AOI)", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 10), anchor="w")
+        tk.Label(self.parent, text="3. Spatial Area of Interest (AOI) Definition", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 10), anchor="w")
 
         main = tk.PanedWindow(self.parent, orient=tk.HORIZONTAL)
         main.pack(fill=tk.BOTH, expand=True)
@@ -143,57 +144,56 @@ class RegionView:
         
         btns = tk.Frame(ctrl)
         btns.pack(pady=5)
-        tk.Button(btns, text="1. Video", command=self.browse_video).pack(side=tk.LEFT, padx=5)
-        tk.Button(btns, text="2. Pose (.gz)", command=self.browse_pose).pack(side=tk.LEFT, padx=5)
-        tk.Button(btns, text="3. Identità (.json)", command=self.browse_identity).pack(side=tk.LEFT, padx=5)
-        tk.Button(btns, text="⏯ Play", command=self.toggle_play).pack(side=tk.LEFT, padx=20)
+        tk.Button(btns, text="1. Video Source", command=self.browse_video).pack(side=tk.LEFT, padx=5)
+        tk.Button(btns, text="2. Pose Data (.gz)", command=self.browse_pose).pack(side=tk.LEFT, padx=5)
+        tk.Button(btns, text="3. Identity Map (.json)", command=self.browse_identity).pack(side=tk.LEFT, padx=5)
+        tk.Button(btns, text="⏯ Playback", command=self.toggle_play).pack(side=tk.LEFT, padx=20)
         
         # TASTO DIAGNOSTICA
-        tk.Button(btns, text="🔍 DIAGNOSTICA FRAME", bg="red", fg="white", font=("Bold", 10), command=self.run_diagnostics).pack(side=tk.RIGHT, padx=20)
+        tk.Button(btns, text="🔍 FRAME DIAGNOSTICS", bg="red", fg="white", font=("Bold", 10), command=self.run_diagnostics).pack(side=tk.RIGHT, padx=20)
         
         # DX: Config
         right = tk.Frame(main, padx=10, pady=10)
         main.add(right, minsize=400)
         
-        tk.Label(right, text="Configurazione AOI", font=("Bold", 14)).pack(pady=10)
+        tk.Label(right, text="AOI Configuration", font=("Bold", 14)).pack(pady=10)
         
         f_prof = tk.Frame(right)
         f_prof.pack(fill=tk.X)
-        tk.Label(f_prof, text="Profilo:").pack(side=tk.LEFT)
+        tk.Label(f_prof, text="Profile:").pack(side=tk.LEFT)
         
         self.cb_profile = ttk.Combobox(f_prof, values=self.pm.list_profiles(), state="readonly")
         self.cb_profile.pack(side=tk.LEFT, padx=5)
         if self.pm.list_profiles(): self.cb_profile.current(0)
         self.cb_profile.bind("<<ComboboxSelected>>", self.on_profile_change)
         
-        tk.Button(f_prof, text="✨ Nuovo (Wizard)", command=self.open_profile_wizard, bg="#e1f5fe").pack(side=tk.LEFT, padx=5)
+        tk.Button(f_prof, text="✨ New (Wizard)", command=self.open_profile_wizard, bg="#e1f5fe").pack(side=tk.LEFT, padx=5)
         
+        # --- SEZIONE SLIDER (Corretta) ---
+        lf_conf = tk.LabelFrame(right, text="Detection Sensitivity / Confidence Threshold", padx=5, pady=5)
+        lf_conf.pack(fill=tk.X, pady=10)
+        
+        tk.Label(lf_conf, text="Keypoint Confidence Threshold (0.0 - 1.0):").pack(anchor="w")
+        s_conf = tk.Scale(lf_conf, from_=0.0, to=1.0, resolution=0.05, orient=tk.HORIZONTAL, variable=self.kp_conf_thresh, command=lambda v: self.show_frame())
+        s_conf.pack(fill=tk.X)
+        tk.Label(lf_conf, text="(Lower to recover missing limbs, Raise to reduce noise)", fg="gray", font=("Arial", 8)).pack(anchor="w")
+        # ---------------------------------
+
+        # --- SEZIONE NOTEBOOK (Corretta: Una sola istanza) ---
         self.notebook = ttk.Notebook(right)
         self.notebook.pack(fill=tk.BOTH, expand=True, pady=10)
         
         self.frame_target = tk.Frame(self.notebook)
-        self.notebook.add(self.frame_target, text="Regole Target")
+        self.notebook.add(self.frame_target, text="Target Rules")
         self.frame_others = tk.Frame(self.notebook)
-        self.notebook.add(self.frame_others, text="Regole Altri")
+        self.notebook.add(self.frame_others, text="Non-Target Rules")
         
         self.refresh_editors()
-        tk.Button(right, text="GENERA E ESPORTA CSV AOI", bg="#4CAF50", fg="white", font=("Bold", 12), height=2, command=self.export_data).pack(side=tk.BOTTOM, fill=tk.X, pady=20)
-        # -----------------------------
-        
-        self.notebook = ttk.Notebook(right)
-        self.notebook.pack(fill=tk.BOTH, expand=True, pady=10)
-        
-        self.frame_target = tk.Frame(self.notebook)
-        self.notebook.add(self.frame_target, text="Regole Target")
-        self.frame_others = tk.Frame(self.notebook)
-        self.notebook.add(self.frame_others, text="Regole Altri")
-        
-        self.refresh_editors()
-        tk.Button(right, text="GENERA E ESPORTA CSV AOI", bg="#4CAF50", fg="white", font=("Bold", 12), height=2, command=self.export_data).pack(side=tk.BOTTOM, fill=tk.X, pady=20)
+        tk.Button(right, text="GENERATE & EXPORT AOI CSV", bg="#4CAF50", fg="white", font=("Bold", 12), height=2, command=self.export_data).pack(side=tk.BOTTOM, fill=tk.X, pady=20)
 
     def open_profile_wizard(self):
         win = tk.Toplevel(self.parent)
-        win.title("Wizard Profilo Avanzato")
+        win.title("Advanced Profile Wizard")
         win.geometry("500x750")
         
         # --- Variabili ---
@@ -211,14 +211,14 @@ class RegionView:
 
         # --- UI Layout ---
         # SEZIONE 1: NOME
-        tk.Label(win, text="1. Nome Profilo", font=("Bold", 12)).pack(pady=(10, 5))
+        tk.Label(win, text="1. Profile Name", font=("Bold", 12)).pack(pady=(10, 5))
         
         f_name = tk.Frame(win); f_name.pack(fill=tk.X, padx=20)
-        tk.Label(f_name, text="Nome File:").pack(side=tk.LEFT)
+        tk.Label(f_name, text="Filename:").pack(side=tk.LEFT)
         tk.Entry(f_name, textvariable=v_name).pack(side=tk.RIGHT, fill=tk.X, expand=True)
 
         # SEZIONE 2: RUOLI
-        tk.Label(win, text="2. Configurazione Ruoli", font=("Bold", 12)).pack(pady=(15, 5))
+        tk.Label(win, text="2. Role Configuration", font=("Bold", 12)).pack(pady=(15, 5))
         
         # Bottone Carica Identity
         def load_identity_wiz():
@@ -229,13 +229,13 @@ class RegionView:
                         data = json.load(f)
                         roles = set(data.values())
                         refresh_roles_ui(roles)
-                        messagebox.showinfo("Info", f"Caricati {len(roles)} ruoli dal file.")
+                        messagebox.showinfo("Info", f"Loaded {len(roles)} roles from file.")
                 except Exception as e:
-                    messagebox.showerror("Errore", str(e))
+                    messagebox.showerror("Error", str(e))
 
-        tk.Button(win, text="📂 Carica Identity JSON (Aggiorna Lista)", command=load_identity_wiz).pack(fill=tk.X, padx=20, pady=5)
+        tk.Button(win, text="📂 Load Identity JSON (Refresh List)", command=load_identity_wiz).pack(fill=tk.X, padx=20, pady=5)
 
-        lf_strat = tk.LabelFrame(win, text="Modalità Visualizzazione", padx=10, pady=10)
+        lf_strat = tk.LabelFrame(win, text="Visualization Mode", padx=10, pady=10)
         lf_strat.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
         
         # Canvas per scrollare se ci sono molti ruoli
@@ -264,8 +264,8 @@ class RegionView:
             roles_set.add("DEFAULT")
 
             # Header
-            tk.Label(frame_roles, text="Ruolo", font=("Bold", 9)).grid(row=0, column=0, sticky="w", padx=5)
-            tk.Label(frame_roles, text="Strategia", font=("Bold", 9)).grid(row=0, column=1, sticky="w", padx=5)
+            tk.Label(frame_roles, text="Role", font=("Bold", 9)).grid(row=0, column=0, sticky="w", padx=5)
+            tk.Label(frame_roles, text="Strategy", font=("Bold", 9)).grid(row=0, column=1, sticky="w", padx=5)
             
             r_idx = 1
             for role in sorted(list(roles_set)):
@@ -287,7 +287,7 @@ class RegionView:
         refresh_roles_ui(current_roles)
 
         # SEZIONE 3: PARAMETRI GEOMETRICI
-        tk.Label(win, text="3. Parametri Geometrici (AOI)", font=("Bold", 12)).pack(pady=(15, 5))
+        tk.Label(win, text="3. Geometric Parameters (AOI)", font=("Bold", 12)).pack(pady=(15, 5))
         
         def add_field(p, lbl, var):
             f = tk.Frame(p); f.pack(fill=tk.X, padx=30, pady=2)
@@ -300,7 +300,7 @@ class RegionView:
         add_field(win, "Feet Bottom Offset (px):", v_feet_off)
         
         f = tk.Frame(win); f.pack(fill=tk.X, padx=30, pady=2)
-        tk.Label(f, text="Peripersonal Expand (x):").pack(side=tk.LEFT)
+        tk.Label(f, text="Peripersonal Expansion (x):").pack(side=tk.LEFT)
         tk.Spinbox(f, from_=1.0, to=5.0, increment=0.1, textvariable=v_peri_exp, width=8).pack(side=tk.RIGHT)
 
         # --- Logica Salvataggio ---
@@ -332,14 +332,14 @@ class RegionView:
             }
             
             self.pm.save_profile(name, new_profile)
-            messagebox.showinfo("Successo", f"Profilo '{name}' salvato!")
+            messagebox.showinfo("Success", f"Profile '{name}' saved!")
             win.destroy()
             
             self.cb_profile['values'] = self.pm.list_profiles()
             self.cb_profile.set(name)
             self.on_profile_change(None)
 
-        tk.Button(win, text="💾 GENERA PROFILO", bg="#4CAF50", fg="white", font=("Bold", 12), command=save_wiz).pack(side=tk.BOTTOM, fill=tk.X, pady=20)
+        tk.Button(win, text="💾 GENERATE PROFILE", bg="#4CAF50", fg="white", font=("Bold", 12), command=save_wiz).pack(side=tk.BOTTOM, fill=tk.X, pady=20)
 
     def refresh_editors(self):
         for widget in self.frame_target.winfo_children(): widget.destroy()
@@ -361,14 +361,14 @@ class RegionView:
             lf.pack(fill=tk.X, pady=5)
             
             # 1. Margine
-            tk.Label(lf, text="Margine (px):").grid(row=0, column=0)
+            tk.Label(lf, text="Margin (px):").grid(row=0, column=0)
             s_margin = tk.Scale(lf, from_=0, to=100, orient=tk.HORIZONTAL)
             s_margin.set(rule.get("margin_px", 0))
             s_margin.grid(row=0, column=1, sticky="ew")
             s_margin.bind("<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_margin: self.update_rule_val(r, i, "margin_px", s.get()))
             
             # 2. Espansione
-            tk.Label(lf, text="Espansione (x):").grid(row=1, column=0)
+            tk.Label(lf, text="Expansion (x):").grid(row=1, column=0)
             s_exp = tk.Scale(lf, from_=1.0, to=4.0, resolution=0.1, orient=tk.HORIZONTAL)
             s_exp.set(rule.get("expand_factor", 1.0))
             s_exp.grid(row=1, column=1, sticky="ew")
@@ -376,7 +376,7 @@ class RegionView:
 
             # 3. (NUOVO) Offset Fondo - Solo se la regola lo prevede (es. Feet)
             if "offset_y_bottom" in rule:
-                tk.Label(lf, text="Estensione Fondo:", fg="blue").grid(row=2, column=0)
+                tk.Label(lf, text="Bottom Extension:", fg="blue").grid(row=2, column=0)
                 s_off = tk.Scale(lf, from_=0, to=100, orient=tk.HORIZONTAL, fg="blue")
                 s_off.set(rule.get("offset_y_bottom", 0))
                 s_off.grid(row=2, column=1, sticky="ew")
@@ -394,54 +394,56 @@ class RegionView:
     # --- DIAGNOSTICA (IL CUORE DEL DEBUG) ---
     def run_diagnostics(self):
         print("\n" + "="*40)
-        print(f"DIAGNOSTICA FRAME {self.current_frame}")
+        print(f"FRAME DIAGNOSTICS {self.current_frame}")
         print("="*40)
         
         # 1. Controllo Dati Pose
         if self.current_frame not in self.pose_data:
-            print(f"❌ NESSUNA POSA trovata per il frame {self.current_frame}.")
-            print("Verifica che il video e il file JSON siano allineati.")
+            print(f"❌ NO POSE found for frame {self.current_frame}.")
+            print("Verify video and JSON alignment.")
             return
         
         frame_poses = self.pose_data[self.current_frame]
-        print(f"✅ Trovati {len(frame_poses)} ID Tracked in questo frame: {list(frame_poses.keys())}")
+        print(f"✅ Found {len(frame_poses)} Tracked IDs in this frame: {list(frame_poses.keys())}")
         
         for tid, kps in frame_poses.items():
-            print(f"\n--- Analisi ID {tid} ---")
+            print(f"\n--- ID Analysis {tid} ---")
             
             # 2. Controllo Identità
             role = self.identity_map.get(str(tid), "Unknown")
-            print(f"   Ruolo Mappato (Identity): '{role}'")
+            print(f"   Mapped Role (Identity): '{role}'")
             
             if role == "Ignore" or role == "Noise":
-                print("   ⛔ SKIPPED: Ruolo è Ignore o Noise.")
+                print("   ⛔ SKIPPED: Role is Ignore or Noise.")
                 continue
             if role == "Unknown":
-                print("   ⚠️ SKIPPED: Ruolo è Unknown (non mappato).")
+                print("   ⚠️ SKIPPED: Role is Unknown (unmapped).")
                 continue
                 
             # 3. Controllo Regole
             # Cerca il ruolo specifico, se non esiste usa DEFAULT, se non esiste lista vuota
             rules = self.current_profile['roles'].get(role, self.current_profile['roles'].get("DEFAULT", []))
             if role not in self.current_profile['roles']:
-                print(f"   ℹ️ INFO: Il ruolo '{role}' non è definito nel Profilo AOI. Vengono usate le regole 'DEFAULT'.")
+                print(f"   ℹ️ INFO: Role '{role}' not defined in AOI Profile. Using 'DEFAULT' rules.")
             
             # 4. Controllo Calcolo Box
             for rule in rules:
                 box = self.calculate_box(kps, rule)
                 if box:
-                    print(f"   ✅ AOI '{rule['name']}': Box calcolato {box}")
+                    print(f"   ✅ AOI '{rule['name']}': Box calculated {box}")
                 else:
-                    print(f"   ❌ AOI '{rule['name']}': Fallito (Keypoints insufficienti o conf bassa)")
+                    print(f"   ❌ AOI '{rule['name']}': Failed (Insufficient keypoints or low conf)")
                     # Debug Punti
                     indices = rule['kps']
                     valid_pts = 0
+                    thresh = self.kp_conf_thresh.get()
+                    print(f"      (Current threshold: {thresh})")
                     for i in indices:
                         if i < len(kps):
                             pt = kps[i]
                             conf = pt[2] if len(pt) > 2 else 0
-                            if conf > 0.3: valid_pts += 1
-                    print(f"      Punti validi trovati: {valid_pts}/{len(indices)}")
+                            if conf > thresh: valid_pts += 1 # ERA: if conf > 0.3
+                    print(f"      Valid points found: {valid_pts}/{len(indices)}")
                     
         print("="*40 + "\n")
 
@@ -468,7 +470,7 @@ class RegionView:
         if not os.path.exists(path): return
         self.context.pose_data_path = path 
         self.pose_data = {}
-        print(f"--- Caricamento Pose: {os.path.basename(path)} ---")
+        print(f"--- Loading Pose Data: {os.path.basename(path)} ---")
         try:
             with gzip.open(path, 'rt', encoding='utf-8') as file:
                 for line in file:
@@ -499,9 +501,9 @@ class RegionView:
                                 final_kps = raw_kps
                             
                             self.pose_data[f_idx][tid] = final_kps
-            print(f"Pose caricate: {len(self.pose_data)} frames.")
+            print(f"Poses loaded: {len(self.pose_data)} frames.")
         except Exception as e: 
-            messagebox.showerror("Err", f"Errore caricamento pose: {str(e)}")
+            messagebox.showerror("Error", f"Error loading poses: {str(e)}")
             import traceback
             traceback.print_exc()
         self.show_frame()
@@ -514,7 +516,7 @@ class RegionView:
         if not os.path.exists(path): return
         self.context.identity_map_path = path # <--- AGGIORNA CONTEXT
         with open(path, 'r') as file: self.identity_map = json.load(file)
-        print(f"Identità caricate: {len(self.identity_map)} ID.")
+        print(f"Identities loaded: {len(self.identity_map)} IDs.")
         self.show_frame()
 
     def calculate_box(self, kps_data, rule):
@@ -528,7 +530,8 @@ class RegionView:
                 if len(pt)>=2: x, y = pt[0], pt[1]
                 if len(pt)>=3: conf = pt[2]
                 else: conf = 1.0
-            if conf > 0.3 and x > 1 and y > 1:
+            thresh = self.kp_conf_thresh.get()
+            if conf > thresh and x > 1 and y > 1:
                 xs.append(x); ys.append(y)
         
         if not xs: return None
@@ -610,4 +613,4 @@ class RegionView:
                     })
         pd.DataFrame(rows).to_csv(out, index=False)
         self.context.aoi_csv_path = out
-        messagebox.showinfo("OK", "Export completo.")
+        messagebox.showinfo("OK", "Export complete.")

@@ -27,8 +27,8 @@ try:
     from hermes_stats import GazeStatsView
 
 except ImportError as e:
-    print(f"ERRORE CRITICO DI IMPORTAZIONE: {e}")
-    print("Controlla che tutti i file (hermes_region.py, hermes_eye.py, ecc.) siano salvati con le nuove classi.")
+    print(f"CRITICAL IMPORT ERROR: {e}")
+    print("Check that all files (hermes_region.py, hermes_eye.py, etc.) are saved with the new classes.")
     sys.exit(1)
 
 class ProjectWizard:
@@ -38,29 +38,29 @@ class ProjectWizard:
         self.on_complete = on_complete
         
         self.win = tk.Toplevel(root)
-        self.win.title("Hermes - Setup Progetto")
+        self.win.title("HERMES - Project Setup")
         self.win.geometry("500x400")
         self.win.protocol("WM_DELETE_WINDOW", sys.exit) # Se chiudi, esci dall'app
         
-        tk.Label(self.win, text="Benvenuto in HERMES", font=("Segoe UI", 20, "bold")).pack(pady=20)
-        tk.Label(self.win, text="Per iniziare, seleziona una cartella di lavoro.\nTutti i file (video, output, profili) saranno salvati lì.", 
+        tk.Label(self.win, text="Welcome to HERMES", font=("Segoe UI", 20, "bold")).pack(pady=20)
+        tk.Label(self.win, text="To start, select a working folder.\nAll files (video, output, profiles) will be saved there.", 
                  justify="center").pack(pady=10)
         
-        tk.Button(self.win, text="📂 Apri / Crea Cartella Progetto", bg="#007ACC", fg="white", font=("Bold", 12),
+        tk.Button(self.win, text="📂 Open / Create Project Folder", bg="#007ACC", fg="white", font=("Bold", 12),
                   height=2, command=self.select_folder).pack(fill=tk.X, padx=50, pady=20)
         
-        self.lbl_path = tk.Label(self.win, text="Nessuna cartella selezionata", fg="gray")
+        self.lbl_path = tk.Label(self.win, text="No folder selected", fg="gray")
         self.lbl_path.pack()
 
     def select_folder(self):
-        path = filedialog.askdirectory(title="Seleziona Cartella Progetto")
+        path = filedialog.askdirectory(title="Select Project Folder")
         if path:
             self.lbl_path.config(text=path, fg="black")
             # Inizializza struttura
             self.context.initialize_project(path)
             
             # Chiedi se importare file
-            if messagebox.askyesno("Importazione Rapida", "Vuoi importare i file sorgente (Video, Tobii, Matlab) ora?"):
+            if messagebox.askyesno("Quick Import", "Do you want to import source files (Video, Tobii, Matlab) now?"):
                 self.run_import_wizard()
             
             self.win.destroy()
@@ -68,20 +68,20 @@ class ProjectWizard:
 
     def run_import_wizard(self):
         # Import Video
-        v = filedialog.askopenfilename(title="Seleziona VIDEO", filetypes=[("Video", "*.mp4 *.avi")])
+        v = filedialog.askopenfilename(title="Select VIDEO", filetypes=[("Video", "*.mp4 *.avi")])
         if v: 
             dest = self.context.import_file(v)
             self.context.update_video(dest)
         
         # Import Matlab
-        m = filedialog.askopenfilename(title="Seleziona MATLAB/CSV", filetypes=[("Data", "*.mat *.csv")])
+        m = filedialog.askopenfilename(title="Select MATLAB/CSV", filetypes=[("Data", "*.mat *.csv")])
         if m: self.context.import_file(m)
 
         # Import Tobii JSON
-        t = filedialog.askopenfilename(title="Seleziona TOBII JSON", filetypes=[("JSON", "*.json")])
+        t = filedialog.askopenfilename(title="Select TOBII JSON", filetypes=[("JSON", "*.json")])
         if t: self.context.import_file(t)
         
-        messagebox.showinfo("Fatto", "File copiati nella cartella 'Input'.")
+        messagebox.showinfo("Done", "Files copied to 'Input' folder.")
 
 
 class HermesUnifiedApp:
@@ -119,7 +119,7 @@ class HermesUnifiedApp:
 
         # B. Navigazione (Passiamo le nuove classi)
         # FASE 1: DATI GREZZI & PREPARAZIONE
-        self.add_nav("1. HUMAN (Yolo)", YoloView)
+        self.add_nav("1. HUMAN (Kinematic Extraction)", YoloView)
         self.add_nav("2. MASTER TOI (Cut)", TOIGeneratorView) # <--- SPOSTATO QUI (Era il 4)
         
         # Separatore visivo: "Qui finisce il setup, inizia l'analisi"
@@ -134,14 +134,14 @@ class HermesUnifiedApp:
 
         # FASE 3: EYE TRACKING & REPORT
         self.add_nav("5. EYE MAPPING", GazeView)
-        self.add_nav("6. STATS", GazeStatsView)
+        self.add_nav("6. ANALYTICS & REPORTING", GazeStatsView)
 
         # C. Area Contenuto (Centrale)
         self.content_area = tk.Frame(self.root, bg="#ecf0f1")
         self.content_area.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         
         # Messaggio di benvenuto
-        tk.Label(self.content_area, text="Benvenuto in HERMES.\nSeleziona un modulo a sinistra.", 
+        tk.Label(self.content_area, text="Welcome to HERMES.\nSelect a module on the left.", 
                  font=("Segoe UI", 16), fg="#95a5a6", bg="#ecf0f1").pack(expand=True)
 
     def add_nav(self, text, ViewClass):

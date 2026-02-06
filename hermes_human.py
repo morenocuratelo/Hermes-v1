@@ -13,10 +13,10 @@ import requests
 import csv
 from ultralytics import YOLO # type: ignore
 
-# --- PARAMETRI METODOLOGICI (CONSTANTS) ---
-# Esposti globalmente per riproducibilità e tuning.
-# CONF_THRESHOLD: Soglia conservativa per bilanciare Precision e Recall.
-# IOU_THRESHOLD: Soglia per la Non-Maximum Suppression (NMS).
+# --- RESEARCH PARAMETERS & HEURISTICS (CONSTANTS) ---
+# Globally exposed for reproducibility and tuning.
+# CONF_THRESHOLD: Conservative threshold to balance Precision and Recall.
+# IOU_THRESHOLD: Threshold for Non-Maximum Suppression (NMS).
 CONF_THRESHOLD = 0.5
 IOU_THRESHOLD = 0.7
 RANDOM_SEED = 42
@@ -24,9 +24,9 @@ ULTRALYTICS_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.
 
 def set_determinism(seed=42):
     """
-    Imposta il seed per garantire la riproducibilità scientifica dei risultati.
-    Blocca le euristiche di ottimizzazione di CUDNN che potrebbero introdurre
-    non-determinismo nell'hardware.
+    Sets the seed to ensure scientific reproducibility of results.
+    Locks CUDNN optimization heuristics that could introduce
+    hardware non-determinism.
     """
     random.seed(seed)
     np.random.seed(seed)
@@ -89,10 +89,10 @@ class YoloView:
         self._check_hardware_from_context()
 
     def _build_ui(self):
-        tk.Label(self.parent, text="1. Human Pose Extraction (YOLO)", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 20), anchor="w")
+        tk.Label(self.parent, text="1. Human Pose Estimation & Tracking", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 20), anchor="w")
 
         # 1. Hardware Info
-        self.lbl_hw = tk.Label(self.parent, text="Inizializzazione...", bg="white", font=("Consolas", 10))
+        self.lbl_hw = tk.Label(self.parent, text="Initializing...", bg="white", font=("Consolas", 10))
         self.lbl_hw.pack(pady=5, anchor="w")
 
         # 2. Selezione File
@@ -103,10 +103,10 @@ class YoloView:
         self._add_picker(lf_files, "Output JSON (.gz):", self.output_path, "*.json.gz", save=True) #capire altri formati
 
         # 3. Configurazione Modello
-        lf_conf = tk.LabelFrame(self.parent, text="Configurazione Modello AI", padx=10, pady=10, bg="white")
+        lf_conf = tk.LabelFrame(self.parent, text="AI Model Configuration", padx=10, pady=10, bg="white")
         lf_conf.pack(fill=tk.X, pady=5)
         
-        tk.Label(lf_conf, text="Modello YOLO:", bg="white").pack(side=tk.LEFT)
+        tk.Label(lf_conf, text="YOLO Model:", bg="white").pack(side=tk.LEFT)
         
         # LISTA MODELLI
         models = [
@@ -114,14 +114,14 @@ class YoloView:
         ]
         self.cb_model = ttk.Combobox(lf_conf, textvariable=self.model_name, values=models, state="readonly", width=25)
         self.cb_model.pack(side=tk.LEFT, padx=10)
-        tk.Label(lf_conf, text="(Salvataggio in: Project/Models)", fg="gray", bg="white").pack(side=tk.LEFT)
+        tk.Label(lf_conf, text="(Saved in: Project/Models)", fg="gray", bg="white").pack(side=tk.LEFT)
 
         # 3b. Configurazione Tracking
-        lf_track = tk.LabelFrame(self.parent, text="Parametri Tracking", padx=10, pady=10, bg="white")
+        lf_track = tk.LabelFrame(self.parent, text="Tracking Parameters", padx=10, pady=10, bg="white")
         lf_track.pack(fill=tk.X, pady=5)
         
         tk.Label(lf_track, text="Tracker:", bg="white").pack(side=tk.LEFT, padx=5)
-        trackers = ["nessuno", "botsort", "bytetrack", "deepocsort", "ocsort"]
+        trackers = ["none", "botsort", "bytetrack", "deepocsort", "ocsort"]
         self.cb_tracker = ttk.Combobox(lf_track, textvariable=self.tracker_type, values=trackers, state="readonly", width=12)
         self.cb_tracker.pack(side=tk.LEFT, padx=5)
         
@@ -138,7 +138,7 @@ class YoloView:
         tk.Scale(lf_track, from_=1, to=120, resolution=1, orient=tk.HORIZONTAL, variable=self.track_buffer, bg="white", length=100).pack(side=tk.LEFT)
 
         # Bottone Avanzate
-        tk.Button(lf_track, text="⚙ Avanzate", command=self.open_tracker_settings).pack(side=tk.LEFT, padx=10)
+        tk.Button(lf_track, text="⚙ Advanced", command=self.open_tracker_settings).pack(side=tk.LEFT, padx=10)
 
         # 4. Progress & Log
         self.progress = ttk.Progressbar(self.parent, orient=tk.HORIZONTAL, length=100, mode='determinate') 
@@ -152,14 +152,14 @@ class YoloView:
         self.log_text.tag_config("stderr", foreground="red")
 
         # 5. Buttons
-        self.btn_run = tk.Button(self.parent, text="AVVIA ANALISI GPU", bg="#007ACC", fg="white", font=("Bold", 12), height=2, command=self.start_thread)
+        self.btn_run = tk.Button(self.parent, text="START GPU ANALYSIS", bg="#007ACC", fg="white", font=("Bold", 12), height=2, command=self.start_thread)
         self.btn_run.pack(fill=tk.X, pady=10)
 
     def _check_hardware_from_context(self):
         if self.context.device == "cuda":
-            self.lbl_hw.config(text=f"✅ ACCELERAZIONE ATTIVA: {self.context.gpu_name}", fg="green")
+            self.lbl_hw.config(text=f"✅ ACCELERATION ACTIVE: {self.context.gpu_name}", fg="green")
         else:
-            self.lbl_hw.config(text=f"⚠️ ATTENZIONE: Nessuna GPU rilevata. Modalità CPU ({self.context.device}).", fg="orange")
+            self.lbl_hw.config(text=f"⚠️ WARNING: No GPU detected. CPU Mode ({self.context.device}).", fg="orange")
 
     def _add_picker(self, p, lbl, var, ft, save=False):
         f = tk.Frame(p, bg="white"); f.pack(fill=tk.X, pady=2)
@@ -195,7 +195,7 @@ class YoloView:
     def open_tracker_settings(self):
         """Apre una finestra per i parametri nascosti del tracker."""
         win = tk.Toplevel(self.parent)
-        win.title("Parametri Avanzati Tracker")
+        win.title("Advanced Tracker Settings")
         win.geometry("350x400")
         
         tk.Label(win, text="ByteTrack / BoT-SORT Settings", font=("Segoe UI", 10, "bold")).pack(pady=10)
@@ -205,29 +205,29 @@ class YoloView:
             tk.Label(f, text=lbl).pack(anchor="w")
             tk.Scale(f, from_=from_, to=to_, resolution=res, orient=tk.HORIZONTAL, variable=var).pack(fill=tk.X)
 
-        add_scale("Track Low Threshold (Recupero tracce deboli):", self.track_low_thresh, 0.01, 0.6, 0.01)
+        add_scale("Track Low Threshold (Low-confidence track recovery):", self.track_low_thresh, 0.01, 0.6, 0.01)
         add_scale("Proximity Threshold (BoT-SORT):", self.proximity_thresh, 0.1, 1.0, 0.05)
         add_scale("Appearance Threshold (BoT-SORT):", self.appearance_thresh, 0.1, 1.0, 0.05)
         
         f_chk = tk.Frame(win); f_chk.pack(fill=tk.X, padx=15, pady=15)
-        tk.Checkbutton(f_chk, text="Abilita Re-Identification (ReID)", variable=self.with_reid).pack(anchor="w")
-        tk.Label(f_chk, text="(Richiede download automatico pesi ReID extra)", fg="gray", font=("Arial", 8)).pack(anchor="w")
+        tk.Checkbutton(f_chk, text="Enable Re-Identification (ReID)", variable=self.with_reid).pack(anchor="w")
+        tk.Label(f_chk, text="(Requires automatic download of extra ReID weights)", fg="gray", font=("Arial", 8)).pack(anchor="w")
         
-        tk.Button(win, text="Chiudi", command=win.destroy, width=15).pack(pady=10)
+        tk.Button(win, text="Close", command=win.destroy, width=15).pack(pady=10)
 
     def start_thread(self):
         if self.is_running: return
         if not self.video_path.get() or not self.output_path.get():
-            messagebox.showwarning("Dati mancanti", "Seleziona video e output.")
+            messagebox.showwarning("Missing Data", "Select video and output.")
             return
             
         self.is_running = True
-        self.btn_run.config(state="disabled", text="INIZIALIZZAZIONE YOLO...")
+        self.btn_run.config(state="disabled", text="INITIALIZING YOLO...")
         t = threading.Thread(target=self.run_yolo_process)
         t.start()
 
     def _download_model_manual(self, model_name, dest_path):
-        print(f"📥 Download modello in corso: {model_name}...")
+        print(f"📥 Downloading model: {model_name}...")
         # URL ufficiali Ultralytics Assets (es. v8.3.0)
         url = ULTRALYTICS_URL + model_name
         try:
@@ -244,10 +244,10 @@ class YoloView:
                         if total_size > 0:
                             perc = int((downloaded / total_size) * 50)
                             self.parent.after(0, lambda v=perc: self.progress.config(value=v))
-            print("✅ Download completato.")
+            print("✅ Download complete.")
             return True
         except Exception as e:
-            print(f"❌ Errore download: {e}")
+            print(f"❌ Download error: {e}")
             if os.path.exists(dest_path): os.remove(dest_path)
             return False
 
@@ -297,11 +297,11 @@ class YoloView:
     # --- NUOVO METODO HELPER PER CSV (LONG FORMAT) ---
     def _export_to_csv_flat(self, json_gz_path):
         """
-        Converte il JSON gerarchico in un CSV 'piatto' (Long Format).
-        Ogni riga = Una persona in un frame. Rigoroso per analisi statistica (Tidy Data).
+        Converts hierarchical JSON to 'flat' CSV (Long Format).
+        Each row = One person in a frame. Strict for statistical analysis (Tidy Data).
         """
         try:
-            print("Convertendo output in CSV Appiattito...")
+            print("Converting output to Flattened CSV...")
             csv_path = json_gz_path.replace(".json.gz", ".csv")
             
             # 1. Definizione Header (59 Colonne per modello Pose standard)
@@ -357,10 +357,10 @@ class YoloView:
                             
                             writer.writerow(row)
                             
-            print(f"✅ Export CSV completato: {csv_path}")
+            print(f"✅ CSV Export complete: {csv_path}")
             return True
         except Exception as e:
-            print(f"⚠️ Errore export CSV: {e}")
+            print(f"⚠️ CSV Export error: {e}")
             return False
     # --------------------------------------
 
@@ -373,7 +373,7 @@ class YoloView:
         iou_value = self.iou_threshold.get()
         
         try:
-            print(f"--- Inizio Analisi ---")
+            print(f"--- Analysis Started ---")
             
             # 0. GESTIONE REID (Download & Path Assoluto)
             reid_path = None
@@ -382,9 +382,9 @@ class YoloView:
                 reid_path = os.path.join(self.context.paths["models"], reid_name)
                 
                 if not os.path.exists(reid_path):
-                    print(f"Modello ReID mancante, avvio download: {reid_name}")
+                    print(f"Missing ReID model, starting download: {reid_name}")
                     if not self._download_model_manual(reid_name, reid_path):
-                        print("⚠️ Download ReID fallito. Disabilito ReID.")
+                        print("⚠️ ReID download failed. Disabling ReID.")
                         self.with_reid.set(False)
                         reid_path = None
                 
@@ -394,32 +394,32 @@ class YoloView:
 
             # Controllo esistenza file configurazione tracker
             if not os.path.exists(tracker_config):
-                print(f"⚠️ ATTENZIONE: '{tracker_config}' non trovato nella cartella di lavoro.")
-                print("   YOLO userà i parametri di default (potrebbero non essere ottimizzati per Human Pose).")
+                print(f"⚠️ WARNING: '{tracker_config}' not found in working directory.")
+                print("   YOLO will use default parameters (may not be optimized for Human Pose).")
             else:
-                print(f"✅ Configurazione tracker generata: {tracker_config}")
+                print(f"✅ Tracker configuration generated: {tracker_config}")
 
-            print(f"Seed di riproducibilità: {RANDOM_SEED}")
+            print(f"Reproducibility seed: {RANDOM_SEED}")
             set_determinism(RANDOM_SEED)
 
             # 1. GESTIONE MODELLO
             model_path = os.path.join(self.context.paths["models"], model_name)
             if not os.path.exists(model_path):
-                print(f"Modello mancante, avvio download: {model_name}")
+                print(f"Missing model, starting download: {model_name}")
                 success = self._download_model_manual(model_name, model_path)
                 if not success:
-                    raise Exception("Impossibile scaricare il modello.")
+                    raise Exception("Unable to download model.")
             else:
                 self.progress.config(value=50)
 
             # 2. CARICAMENTO
-            print("Caricamento pesi YOLO in VRAM...")
+            print("Allocating YOLO weights to VRAM...")
             model = YOLO(model_path) 
             
             # 3. PREPARAZIONE METADATI
             cap = cv2.VideoCapture(video_file)
             if not cap.isOpened():
-                raise IOError(f"Impossibile aprire il video: {video_file}")
+                raise IOError(f"Unable to open video: {video_file}")
                 
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             fps = cap.get(cv2.CAP_PROP_FPS)
@@ -427,7 +427,7 @@ class YoloView:
             
             self.parent.after(0, lambda: self.progress.configure(maximum=total_frames + total_frames)) 
             
-            print(f"Avvio tracking {tracker_config} (Conf: {conf_value}, IoU: {iou_value})...")
+            print(f"Starting tracking {tracker_config} (Conf: {conf_value}, IoU: {iou_value})...")
             
             # ---------------------------------------------------------
             # [SECTION: COMPUTER VISION PIPELINE]
@@ -446,7 +446,7 @@ class YoloView:
             # ---------------------------------------------------------
             
             # Verifica se il tracker è attivo
-            is_tracker_enabled = self.tracker_type.get() != "nessuno"
+            is_tracker_enabled = self.tracker_type.get() != "none"
             
             if is_tracker_enabled:
                 results = model.track(
@@ -460,7 +460,7 @@ class YoloView:
                     device=0 if self.context.device == "cuda" else "cpu"
                 )
             else:
-                print("Avvio analisi SENZA tracker (solo detection)...")
+                print("Starting analysis WITHOUT tracker (detection only)...")
                 results = model.predict(
                     source=video_file,
                     stream=True,
@@ -522,26 +522,26 @@ class YoloView:
                         current_val = total_frames + i 
                         self.parent.after(0, lambda v=current_val: self.progress.config(value=v))
                         if i % 100 == 0:
-                            print(f"Elaborato Frame: {i}/{total_frames} | Oggetti tracciati: {len(det_list)}")
+                            print(f"Processed Frame: {i}/{total_frames} | Tracked objects: {len(det_list)}")
 
-            print(f"✅ Analisi YOLO completata. Output JSON salvato.")
+            print(f"✅ YOLO analysis complete. JSON output saved.")
             
             # Avvia conversione Matlab immediata
             self._export_to_csv_flat(out_file)
             
             self.context.pose_data_path = out_file
-            messagebox.showinfo("Finito", "Analisi completata.")
+            messagebox.showinfo("Finished", "Analysis complete.")
             
         except Exception as e:
-            print(f"❌ ERRORE CRITICO: {str(e)}")
+            print(f"❌ CRITICAL ERROR: {str(e)}")
             import traceback
             traceback.print_exc() # Stampa stack trace per debug profondo
-            messagebox.showerror("Errore", f"Errore durante l'analisi:\n{str(e)}")
+            messagebox.showerror("Error", f"Error during analysis:\n{str(e)}")
             
         finally:
             self.is_running = False
             self.parent.after(0, self._reset_btn)
 
     def _reset_btn(self):
-        self.btn_run.config(state="normal", text="AVVIA ANALISI GPU")
+        self.btn_run.config(state="normal", text="START GPU ANALYSIS")
         self.progress.config(value=0)

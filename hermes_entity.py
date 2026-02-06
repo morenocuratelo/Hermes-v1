@@ -346,15 +346,17 @@ class IdentityView:  # <--- CAMBIATO NOME
         """
         # 1. Validation
         selection = self.tree.selection()
-        if not selection:
-            messagebox.showwarning("Attenzione", "Nessuna traccia selezionata.")
+        first = next(iter(selection), None)
+        if first is None:
+            messagebox.showwarning("Warning", "No track selected.")
             return
+        track_id_to_split = int(first)
+
         
         if len(selection) > 1:
             messagebox.showwarning("Attenzione", "Seleziona una sola traccia da dividere.")
             return
 
-        track_id_to_split = int(selection[0])
         split_frame = self.current_frame
         
         track_data = self.tracks.get(track_id_to_split)

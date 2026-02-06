@@ -51,13 +51,13 @@ class GazeView: # <--- NOME CAMBIATO
         self._add_file_picker(lf_files, "Tobii Gaze Data (.gz):", self.gaze_path, "*.gz")
 
         # 2. Parametri Sincronizzazione
-        lf_params = tk.LabelFrame(main, text="2. Parametri Video & Sync", padx=10, pady=10)
+        lf_params = tk.LabelFrame(main, text="2. Video & Sync Parameters", padx=10, pady=10)
         lf_params.pack(fill=tk.X, pady=5)
         
         grid_f = tk.Frame(lf_params)
         grid_f.pack(fill=tk.X)
         
-        tk.Label(grid_f, text="Risoluzione Video (WxH):").grid(row=0, column=0, sticky="w")
+        tk.Label(grid_f, text="Video Resolution (WxH):").grid(row=0, column=0, sticky="w")
         tk.Entry(grid_f, textvariable=self.video_res_w, width=8).grid(row=0, column=1)
         tk.Label(grid_f, text="x").grid(row=0, column=2)
         tk.Entry(grid_f, textvariable=self.video_res_h, width=8).grid(row=0, column=3)
@@ -67,18 +67,18 @@ class GazeView: # <--- NOME CAMBIATO
         
         tk.Label(grid_f, text="Sync Offset (sec):").grid(row=2, column=0, sticky="w")
         tk.Entry(grid_f, textvariable=self.sync_offset, width=8).grid(row=2, column=1)
-        tk.Label(grid_f, text="(Usa valori negativi se il Gaze inizia DOPO il video)", fg="gray", font=("Arial", 8)).grid(row=2, column=2, columnspan=3, sticky="w")
+        tk.Label(grid_f, text="(Use negative values if Gaze starts AFTER video)", fg="gray", font=("Arial", 8)).grid(row=2, column=2, columnspan=3, sticky="w")
 
         # 3. Process
-        tk.Button(main, text="ELABORA E MAPPA", bg="#007ACC", fg="white", font=("Bold", 12), height=2, command=self.run_process).pack(fill=tk.X, pady=20)
+        tk.Button(main, text="PROCESS AND MAP", bg="#007ACC", fg="white", font=("Bold", 12), height=2, command=self.run_process).pack(fill=tk.X, pady=20)
         
         # --- NUOVO BOTTONE PLAYER ---
-        tk.Button(main, text="📺 VISUALIZZA PLAYER RISULTATI", command=self.open_player).pack(fill=tk.X, pady=5)
+        tk.Button(main, text="📺 VIEW RESULTS PLAYER", command=self.open_player).pack(fill=tk.X, pady=5)
         
         self.progress = ttk.Progressbar(main, orient=tk.HORIZONTAL, mode='indeterminate')
         self.progress.pack(fill=tk.X)
         
-        self.lbl_status = tk.Label(main, text="Pronto.")
+        self.lbl_status = tk.Label(main, text="Ready.")
         self.lbl_status.pack()
 
     def _add_file_picker(self, parent, label, var, filetype):
@@ -98,10 +98,10 @@ class GazeView: # <--- NOME CAMBIATO
 
     def run_process(self):
         if not self.aoi_path.get() or not self.gaze_path.get():
-            messagebox.showwarning("Mancano File", "Seleziona sia il file AOI che il file GazeData.")
+            messagebox.showwarning("Missing Files", "Select both AOI file and GazeData file.")
             return
             
-        self.lbl_status.config(text="Caricamento AOI in memoria...")
+        self.lbl_status.config(text="Loading AOI into memory...")
         self.parent.update()
         
         try:
@@ -114,13 +114,13 @@ class GazeView: # <--- NOME CAMBIATO
             # Gestione flessibile ID/TrackID
             id_col_name = 'ID' if 'ID' in df_aoi.columns else 'TrackID'
             if id_col_name not in df_aoi.columns:
-                 raise ValueError(f"Colonna ID mancante nel CSV. Colonne trovate: {list(df_aoi.columns)}")
+                 raise ValueError(f"Missing ID column in CSV. Found columns: {list(df_aoi.columns)}")
             
             aoi_lookup = {}
             for frame, group in df_aoi.groupby('Frame'):
                 aoi_lookup[frame] = group.to_dict('records')
             
-            self.lbl_status.config(text=f"AOI Indicizzate ({len(aoi_lookup)} frame). Elaborazione Gaze...")
+            self.lbl_status.config(text=f"AOI Indexed ({len(aoi_lookup)} frames). Processing Gaze...")
             self.progress.start(10)
             self.parent.update()
             
@@ -189,7 +189,7 @@ class GazeView: # <--- NOME CAMBIATO
                     except json.JSONDecodeError: continue
 
             self.progress.stop()
-            self.lbl_status.config(text="Salvataggio CSV...")
+            self.lbl_status.config(text="Saving CSV...")
             
             # 3. Export
             out_path = self.gaze_path.get().replace(".gz", "_MAPPED.csv")
@@ -199,13 +199,13 @@ class GazeView: # <--- NOME CAMBIATO
             self.context.mapped_csv_path = out_path
             df_out.to_csv(out_path, index=False)
             
-            messagebox.showinfo("Successo", f"Mapping completato!\nFile salvato in:\n{out_path}\n\nRighe totali: {len(df_out)}")
-            self.lbl_status.config(text="Fatto.")
+            messagebox.showinfo("Success", f"Mapping complete!\nFile saved in:\n{out_path}\n\nTotal rows: {len(df_out)}")
+            self.lbl_status.config(text="Done.")
             
         except Exception as e:
             self.progress.stop()
-            messagebox.showerror("Errore Critico", str(e))
-            self.lbl_status.config(text="Errore.")
+            messagebox.showerror("Critical Error", str(e))
+            self.lbl_status.config(text="Error.")
 
     def open_player(self):
         vid = self.context.video_path
@@ -218,11 +218,11 @@ class GazeView: # <--- NOME CAMBIATO
                  csv = candidate
         
         if not vid or not os.path.exists(vid):
-            messagebox.showerror("Errore", "Video non trovato nel contesto.\nCarica un video in Human o Entity prima.")
+            messagebox.showerror("Error", "Video not found in context.\nLoad a video in Human or Entity first.")
             return
             
         if not csv or not os.path.exists(csv):
-            messagebox.showerror("Errore", "File Mapped CSV non trovato.\nEsegui prima il mapping.")
+            messagebox.showerror("Error", "Mapped CSV file not found.\nRun mapping first.")
             return
             
         GazeResultPlayer(self.parent, vid, csv)
@@ -249,7 +249,7 @@ class GazeResultPlayer:
                 if f_idx not in self.data_map: self.data_map[f_idx] = []
                 self.data_map[f_idx].append(row)
         except Exception as e:
-            messagebox.showerror("Errore CSV", str(e))
+            messagebox.showerror("CSV Error", str(e))
             self.win.destroy()
             return
 

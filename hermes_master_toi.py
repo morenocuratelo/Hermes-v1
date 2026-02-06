@@ -105,7 +105,7 @@ class TOIGenerator:
                 target_event = next((e for e in tobii_data if e.get('label', '').lower() == target_label.lower()), None)
                 if not target_event: 
                     # Fallback sul primo evento se non trova la label specifica
-                    print(f"Attenzione: Label '{target_label}' non trovata. Uso il primo evento disponibile.")
+                    print(f"Warning: Label '{target_label}' not found. Using first available event.")
                     target_event = tobii_data[0]
             else:
                 target_event = tobii_data
@@ -114,7 +114,7 @@ class TOIGenerator:
             print(f"Tobii Sync Point ({target_label}): {tobii_ts}s")
             
         except Exception as e:
-            raise ValueError(f"Errore Tobii JSON: {e}")
+            raise ValueError(f"Tobii JSON Error: {e}")
 
         # 2. Load Matlab Data (CSV or MAT) <--- MODIFIED SECTION
         try:
@@ -135,17 +135,17 @@ class TOIGenerator:
         offset_val = float(sync_logic.get('seconds_offset', 0.0))  # Es. -60.0
         
         if not matlab_anchor_col:
-            raise ValueError("Profilo errato: Manca 'matlab_anchor_column' in sync_logic.")
+            raise ValueError("Invalid Profile: Missing 'matlab_anchor_column' in sync_logic.")
             
         if matlab_anchor_col not in df.columns:
-            raise ValueError(f"Errore: La colonna di sync '{matlab_anchor_col}' definita nel profilo NON esiste nel file CSV caricato.\nColonne disponibili: {list(df.columns)}")
+            raise ValueError(f"Error: Sync column '{matlab_anchor_col}' defined in profile does NOT exist in loaded CSV.\nAvailable columns: {list(df.columns)}")
 
         # Leggi orario Matlab
         matlab_sync_str = df.iloc[0][matlab_anchor_col]
         matlab_sync_sec = TOIGenerator.parse_time_string(matlab_sync_str)
         
         if matlab_sync_sec is None:
-            raise ValueError(f"Impossibile leggere orario nella colonna '{matlab_anchor_col}'")
+            raise ValueError(f"Cannot read time in column '{matlab_anchor_col}'")
 
         # CALCOLO DELTA
         # Formula: Video_Time = Matlab_Time + Delta
@@ -154,8 +154,8 @@ class TOIGenerator:
         delta_seconds = tobii_ts - (matlab_sync_sec + offset_val)
         
         print(f"Matlab Anchor ({matlab_anchor_col}): {matlab_sync_sec}s")
-        print(f"Offset applicato: {offset_val}s")
-        print(f"Delta calcolato: {delta_seconds:.3f}s")
+        print(f"Applied Offset: {offset_val}s")
+        print(f"Calculated Delta: {delta_seconds:.3f}s")
 
         # 4. Generazione Trial
         toi_rows = []
@@ -219,101 +219,121 @@ class TOIGeneratorView:
         self.parent = parent
         self.context = context
         
-        # --- FIX: Usa path dal progetto ---
+        # --- PATH MANAGEMENT ---
         if self.context and self.context.paths["profiles_toi"]:
             p_dir = self.context.paths["profiles_toi"]
         else:
-            p_dir = "profiles_toi_fallback" # Fallback
+            p_dir = "profiles_toi_fallback"
             
         self.pm = ProfileManager(profiles_dir=p_dir)
         
+        # Variabili UI
         self.tobii_file = tk.StringVar()
         self.matlab_file = tk.StringVar()
         self.output_file = tk.StringVar()
         self.selected_profile = tk.StringVar()
+        self.yolo_raw_path = tk.StringVar()
+
+        # Auto-load Optimization path
+        if self.context and self.context.pose_data_path and self.context.pose_data_path.endswith('.json.gz'):
+            self.yolo_raw_path.set(self.context.pose_data_path)
         
         self._build_ui()
 
     def _build_ui(self):
-        tk.Label(self.parent, text="4. TOI Builder (Sync & Cut)", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 10), anchor="w")
-        main = tk.Frame(self.parent, padx=20, pady=20, bg="white")
+        # Header Principale
+        header_frame = tk.Frame(self.parent, bg="white", pady=10)
+        header_frame.pack(fill=tk.X)
+        tk.Label(header_frame, text="4. TOI Builder & Synchronization", font=("Segoe UI", 18, "bold"), bg="white").pack(anchor="w", padx=10)
+        tk.Label(header_frame, text="Synchronizes data streams and defines Temporal Intervals of Interest (TOI).", 
+                 font=("Segoe UI", 10), fg="#666", bg="white").pack(anchor="w", padx=10)
+
+        # Container scrollabile o frame principale
+        main = tk.Frame(self.parent, padx=15, pady=15)
         main.pack(fill=tk.BOTH, expand=True)
-        tk.Label(main, text="TOI Builder - Lab Modigliani", font=("Segoe UI", 14, "bold")).pack(pady=(0, 20))
 
-        # 1. Profilo
-        lf1 = tk.LabelFrame(main, text="1. Profilo Esperimento", padx=10, pady=10)
-        lf1.pack(fill=tk.X, pady=5)
-        self.cb = ttk.Combobox(lf1, textvariable=self.selected_profile, state="readonly")
-        self.cb.pack(fill=tk.X)
+        # ==========================================
+        # PARTE A: PROCESSO PRINCIPALE (Config & Run)
+        # ==========================================
+        
+        # Frame Configurazione (Profilo + Input) affiancati o raggruppati
+        lf_config = tk.LabelFrame(main, text="A. Experiment Configuration", font=("Bold", 11), padx=10, pady=10)
+        lf_config.pack(fill=tk.X, pady=(0, 10))
+
+        # Riga 1: Profilo
+        f_prof = tk.Frame(lf_config)
+        f_prof.pack(fill=tk.X, pady=5)
+        tk.Label(f_prof, text="Selected Profile:", width=20, anchor="w").pack(side=tk.LEFT)
+        self.cb = ttk.Combobox(f_prof, textvariable=self.selected_profile, state="readonly", width=40)
+        self.cb.pack(side=tk.LEFT, padx=5)
         self.refresh_profiles()
-        ttk.Button(lf1, text="Aggiorna Lista", command=self.refresh_profiles).pack(pady=5)
-        ttk.Button(lf1, text="➕ Crea Nuovo Profilo (Wizard)", command=self.launch_wizard).pack(pady=5)
+        tk.Button(f_prof, text="🔄", command=self.refresh_profiles, width=3).pack(side=tk.LEFT)
+        tk.Button(f_prof, text="⚙️ Manage Profiles", command=self.launch_wizard).pack(side=tk.LEFT, padx=10)
 
-        # 2. Input
-        lf2 = tk.LabelFrame(main, text="2. Dati Input", padx=10, pady=10)
-        lf2.pack(fill=tk.X, pady=10)
-        self._add_picker(lf2, "Eventi Tobii (.json):", self.tobii_file, "*.json", 0)
-        self._add_picker(lf2, "Results Matlab (.csv, .mat):", self.matlab_file, "*.csv *.mat", 2)
+        # Separatore visivo interno
+        ttk.Separator(lf_config, orient='horizontal').pack(fill='x', pady=10)
 
-        # 3. Output
-        lf3 = tk.LabelFrame(main, text="3. Output", padx=10, pady=10)
-        lf3.pack(fill=tk.X, pady=5)
-        tk.Entry(lf3, textvariable=self.output_file).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        tk.Button(lf3, text="Scegli...", command=self.save_as).pack(side=tk.LEFT, padx=5)
+        # Riga 2: Inputs
+        self._add_file_row(lf_config, "Tobii Events (.json):", self.tobii_file, "*.json")
+        self._add_file_row(lf_config, "Matlab Data (.csv/.mat):", self.matlab_file, "*.csv *.mat")
 
-        tk.Button(main, text="GENERA TOI", bg="#007ACC", fg="white", font=("Arial", 11, "bold"), height=2, command=self.run).pack(fill=tk.X, pady=20)
+        # Frame Output & Azione
+        lf_action = tk.LabelFrame(main, text="B. TOI Generation", font=("Bold", 11), padx=10, pady=10)
+        lf_action.pack(fill=tk.X, pady=(0, 20))
 
-        # Sezione 4: Sfoltitura Dati YOLO
-        lf4 = tk.LabelFrame(main, text="4. Ottimizzazione (Sfoltitura Dati RAW)", padx=10, pady=10)
-        lf4.pack(fill=tk.X, pady=10)
+        # Riga Output
+        f_out = tk.Frame(lf_action)
+        f_out.pack(fill=tk.X, pady=5)
+        tk.Label(f_out, text="Save TOI as:", width=20, anchor="w").pack(side=tk.LEFT)
+        tk.Entry(f_out, textvariable=self.output_file).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        tk.Button(f_out, text="📂 Browse...", command=self.save_as).pack(side=tk.LEFT)
+
+        # Big Button
+        tk.Button(lf_action, text="🚀 GENERATE TOI FILE (SYNC)", bg="#007ACC", fg="white", 
+                  font=("Segoe UI", 12, "bold"), height=2, cursor="hand2", 
+                  command=self.run).pack(fill=tk.X, pady=10)
+
+        # ==========================================
+        # PARTE B: OTTIMIZZAZIONE (Sezione 4 Migliorata)
+        # ==========================================
         
-        self.yolo_raw_path = tk.StringVar()
-        
-        # Auto-load se presente nel context (e se è un json.gz)
-        if self.context and self.context.pose_data_path and self.context.pose_data_path.endswith('.json.gz'):
-            self.yolo_raw_path.set(self.context.pose_data_path)
+        # Separatore visivo forte tra le due fasi
+        tk.Label(main, text="Advanced Tools", font=("Bold", 10), fg="#888").pack(anchor="w", pady=(10, 0))
+        ttk.Separator(main, orient='horizontal').pack(fill='x', pady=5)
 
-        # MODIFICA QUI: Filtro per JSON.GZ
-        self._add_picker(lf4, "File YOLO (.json.gz):", self.yolo_raw_path, "*.json.gz", 4)
-        
-        tk.Button(lf4, text="✂️ TAGLIA FILE RAW (Keep only TOIs)", 
-                bg="#ff9800", fg="white", font=("Bold", 10), 
-                command=self.run_cropping).grid(row=5, column=1, pady=5, sticky="e")
+        # Frame dedicato con colore di sfondo leggermente diverso o bordo
+        lf_opt = tk.LabelFrame(main, text="C. Data Pruning (Optional)", font=("Bold", 11), fg="#E65100", padx=10, pady=10)
+        lf_opt.pack(fill=tk.X, pady=10)
 
-    def run_cropping(self):
-        # 1. Recupera percorsi
-        raw_in = self.yolo_raw_path.get().strip()
-        toi_in = self.output_file.get().strip() 
-        
-        # --- DEBUG ---
-        print("\n--- DEBUG SFOLTITURA JSON ---")
-        print(f"Raw Input: '{raw_in}' -> Esiste? {os.path.exists(raw_in)}")
-        print(f"TOI Input: '{toi_in}' -> Esiste? {os.path.exists(toi_in)}")
+        # Spiegazione User Friendly
+        info_frame = tk.Frame(lf_opt)
+        info_frame.pack(fill=tk.X, pady=(0, 10))
+        lbl_icon = tk.Label(info_frame, text="💡", font=("Arial", 16))
+        lbl_icon.pack(side=tk.LEFT, anchor="n")
+        lbl_desc = tk.Label(info_frame, justify="left", wraplength=500,
+                            text="This function prunes the original YOLO file (.json.gz) removing "
+                                 "data before the experiment start (Sync).\n"
+                                 "Recommended to reduce file size and speed up analysis.")
+        lbl_desc.pack(side=tk.LEFT, padx=10)
 
-        if not raw_in or not os.path.exists(raw_in):
-            messagebox.showwarning("File mancante", "Seleziona un file YOLO .json.gz valido.")
-            return
+        # Input File Raw
+        self._add_file_row(lf_opt, "Raw YOLO File (.gz):", self.yolo_raw_path, "*.json.gz")
 
-        if not toi_in or not os.path.exists(toi_in):
-            messagebox.showwarning("File mancante", "File TOI non trovato. Generalo prima.")
-            return
-            
-        # 2. Esegui il taglio sul JSON
-        cropped_path = DataCropper.crop_yolo_json(raw_in, toi_in)
-        
-        if cropped_path:
-            # Aggiorna il context
-            if self.context:
-                self.context.pose_data_path = cropped_path
-                messagebox.showinfo("Ottimizzazione", f"File RAW sfoltito creato!\n{os.path.basename(cropped_path)}\n\nI moduli successivi useranno questo file più leggero.")
-        else:
-            messagebox.showerror("Errore", "Sfoltitura fallita. Vedi console.")
-    
-    def _add_picker(self, p, lbl, var, ft, r):
-        tk.Label(p, text=lbl).grid(row=r, column=0, sticky="w")
-        tk.Entry(p, textvariable=var, width=45).grid(row=r+1, column=0, padx=5)
-        tk.Button(p, text="...", width=3, command=lambda: self.browse(var, ft)).grid(row=r+1, column=1)
+        # Bottone Azione Ottimizzazione
+        btn_opt = tk.Button(lf_opt, text="✂️ PRUNE & OPTIMIZE DATA", 
+                            bg="#ff9800", fg="white", font=("Segoe UI", 10, "bold"), 
+                            cursor="hand2", command=self.run_cropping)
+        btn_opt.pack(fill=tk.X, pady=5)
 
+    def _add_file_row(self, parent, label_text, var, file_types):
+        """Helper per creare righe di input pulite"""
+        f = tk.Frame(parent)
+        f.pack(fill=tk.X, pady=2)
+        tk.Label(f, text=label_text, width=20, anchor="w").pack(side=tk.LEFT)
+        tk.Entry(f, textvariable=var, fg="#333").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        tk.Button(f, text="📂", width=4, command=lambda: self.browse(var, file_types)).pack(side=tk.LEFT)
+
+    # --- LOGICA (Invariata) ---
     def refresh_profiles(self):
         v = self.pm.get_available_profiles()
         self.cb['values'] = v
@@ -323,36 +343,62 @@ class TOIGeneratorView:
         f = filedialog.askopenfilename(filetypes=[("File", ft)])
         if f: 
             var.set(f)
-            if self.matlab_file.get() and not self.output_file.get():
+            # Auto-suggest output name if matlab input is selected
+            if var == self.matlab_file and not self.output_file.get():
+                base = os.path.splitext(f)[0]
                 if self.context and self.context.paths["output"]:
-                    name = os.path.splitext(os.path.basename(f))[0] + "_TOIs.tsv"
-                    self.output_file.set(os.path.join(self.context.paths["output"], name))
+                    name = os.path.basename(base) + "_TOIs.tsv"
+                    out = os.path.join(self.context.paths["output"], name)
                 else:
-                    self.output_file.set(os.path.splitext(f)[0] + "_TOIs.tsv")
+                    out = base + "_TOIs.tsv"
+                self.output_file.set(out)
 
     def save_as(self):
         f = filedialog.asksaveasfilename(defaultextension=".tsv", filetypes=[("TSV", "*.tsv")])
         if f: self.output_file.set(f)
 
     def run(self):
-        if not self.selected_profile.get(): return
+        if not self.selected_profile.get(): 
+            messagebox.showwarning("Warning", "Select a profile before proceeding.")
+            return
         try:
             prof = self.pm.load_profile(self.selected_profile.get())
             n = TOIGenerator.process(self.matlab_file.get(), self.tobii_file.get(), prof, self.output_file.get())
             if self.context:
                 self.context.toi_path = self.output_file.get()
-            messagebox.showinfo("Successo", f"Generati {n} TOI.")
+            messagebox.showinfo("Success", f"Generated {n} TOI intervals.\nYou can now proceed to optimization (Step C) if needed.")
         except Exception as e:
-            messagebox.showerror("Errore", str(e))
+            messagebox.showerror("Generation Error", str(e))
     
     def launch_wizard(self):
         try:
             from hermes_master_prof import ProfileWizard
             win = tk.Toplevel(self.parent)
-            win.title("Wizard Profilo")
+            win.title("Profile Wizard")
             ProfileWizard(win)
         except ImportError:
-            messagebox.showerror("Errore", "Impossibile trovare hermes_master_prof.py")
+            messagebox.showerror("Error", "Cannot find hermes_master_prof.py")
+
+    def run_cropping(self):
+        raw_in = self.yolo_raw_path.get().strip()
+        toi_in = self.output_file.get().strip() 
+        
+        if not raw_in or not os.path.exists(raw_in):
+            messagebox.showwarning("Missing File", "Select a valid YOLO .json.gz file in section C.")
+            return
+
+        if not toi_in or not os.path.exists(toi_in):
+            messagebox.showwarning("Missing File", "TOI file not found. Run Step B (Generate) first.")
+            return
+            
+        cropped_path = DataCropper.crop_yolo_json(raw_in, toi_in)
+        
+        if cropped_path:
+            if self.context:
+                self.context.pose_data_path = cropped_path
+            messagebox.showinfo("Optimization", f"Pruned RAW file created!\n{os.path.basename(cropped_path)}")
+        else:
+            messagebox.showerror("Error", "Pruning failed. See console for details.")
 class DataCropper:
     @staticmethod
     def crop_yolo_json(json_gz_path, toi_path, output_suffix="_CROPPED"):
@@ -361,7 +407,7 @@ class DataCropper:
         Crea un nuovo file .json.gz contenente solo i frame dal primo TOI in poi.
         """
         try:
-            print(f"✂️ Avvio sfoltitura RAW su: {os.path.basename(json_gz_path)}")
+            print(f"✂️ Starting RAW pruning on: {os.path.basename(json_gz_path)}")
             
             # 1. Trova il tempo di inizio minimo dai TOI
             try:
@@ -371,11 +417,11 @@ class DataCropper:
                 df_toi = pd.read_csv(toi_path)
 
             if df_toi.empty:
-                print("⚠️ File TOI vuoto, impossibile tagliare.")
+                print("⚠️ Empty TOI file, cannot prune.")
                 return None
             
             start_cut_time = df_toi['Start'].min()
-            print(f"⏱️ Tempo di taglio individuato: {start_cut_time:.3f} sec")
+            print(f"⏱️ Cut-off time identified: {start_cut_time:.3f} sec")
             
             # 2. Setup percorsi
             path_parts = os.path.splitext(os.path.splitext(json_gz_path)[0]) # Rimuove .gz poi .json
@@ -386,7 +432,7 @@ class DataCropper:
             dropped_frames = 0
             
             # 3. Streaming Read/Write (Memoria efficiente)
-            print("⏳ Elaborazione in corso (Streaming)...")
+            print("⏳ Processing (Streaming)...")
             with gzip.open(json_gz_path, 'rt', encoding='utf-8') as f_in, \
                  gzip.open(new_path, 'wt', encoding='utf-8') as f_out:
                 
@@ -408,13 +454,13 @@ class DataCropper:
                     except json.JSONDecodeError:
                         continue
 
-            print(f"✅ Sfoltitura completata.")
-            print(f"   Frame rimossi:   {dropped_frames}")
-            print(f"   Frame mantenuti: {kept_frames}")
-            print(f"   Salvato in:      {os.path.basename(new_path)}")
+            print(f"✅ Pruning complete.")
+            print(f"   Frames removed:   {dropped_frames}")
+            print(f"   Frames kept: {kept_frames}")
+            print(f"   Saved in:      {os.path.basename(new_path)}")
             
             return new_path
 
         except Exception as e:
-            print(f"❌ Errore durante la sfoltitura JSON: {e}")
+            print(f"❌ Error during JSON pruning: {e}")
             return None
