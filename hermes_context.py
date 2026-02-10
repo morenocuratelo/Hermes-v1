@@ -2,6 +2,7 @@ import torch
 import os
 import shutil
 import json
+import pandas as pd # Usato per timestamp, assicurati di averlo o usa datetime
 
 class AppContext:
     def __init__(self):
@@ -10,39 +11,30 @@ class AppContext:
         self.gpu_name = torch.cuda.get_device_name(0) if self.device == "cuda" else "No GPU"
         print(f"SYSTEM: Context initialized on {self.device} ({self.gpu_name})")
 
-        # Config Persistence
+        # Config Persistence (Globale dell'App, es. ultimi progetti aperti)
         self.config_file = "hermes_config.json"
         self.last_project = None
         self.recent_files = {"video": [], "data": []}
 
-        # 2. Project Management
-        self.project_path = None
-        self.paths = {
-            "root": "",
-            "input": "",
-            "output": "",
-            "profiles_toi": "",
-            "profiles_aoi": "",
-            "models": ""
-        }
+        # 2. Project State
+        self.project_root = None
+        self.project_config = {}
         
-        # 3. Shared Data References
-        self.video_path = None
-        self.gaze_data_path = None      # .gz (Tobii)
-        self.pose_data_path = None      # .json.gz
-        self.identity_map_path = None   # .json
-        self.toi_path = None            # .tsv
-        self.mapped_csv_path = None     # .csv
-        self.aoi_csv_path = None        # .csv
-        self.export_path = None         # Ultimo export CSV AOI
-        self.yolo_model_path = None     # .pt
+        # 3. Participant Management
+        self.participants = []      # Lista ID stringhe: ["P001", "P002"]
+        self.current_participant = None # ID attivo: "P001"
         
-        # Mapping Ruoli/Colori condiviso
+        # 4. Global Settings (Cast, Models)
         self.cast = {} 
+        self.yolo_model_path = None # Modello globale per il progetto
 
-        self.load_config()
+        self.load_global_config()
 
-    def load_config(self):
+    # ════════════════════════════════════════════════════════════════
+    # GLOBAL APP CONFIG (Persistenza tra riavvi)
+    # ════════════════════════════════════════════════════════════════
+
+    def load_global_config(self):
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, 'r') as f:
@@ -52,9 +44,9 @@ class AppContext:
             except Exception as e:
                 print(f"Config Load Error: {e}")
 
-    def save_config(self):
+    def save_global_config(self):
         data = {
-            "last_project": self.project_path,
+            "last_project": self.project_root, # Salva il progetto corrente come ultimo
             "recent_files": self.recent_files
         }
         try:
@@ -63,135 +55,223 @@ class AppContext:
         except Exception as e:
             print(f"Config Save Error: {e}")
 
-    def add_recent_file(self, category, path):
-        if not path: return
-        if category not in self.recent_files: self.recent_files[category] = []
-        if path in self.recent_files[category]:
-            self.recent_files[category].remove(path)
-        self.recent_files[category].insert(0, path)
-        self.recent_files[category] = self.recent_files[category][:10]
-        self.save_config()
+    # ════════════════════════════════════════════════════════════════
+    # PROJECT MANAGEMENT (Hub & Spoke)
+    # ════════════════════════════════════════════════════════════════
 
-    def update_video(self, path):
-        """Aggiorna il percorso video nel contesto."""
-        if path and os.path.exists(path):
-            self.video_path = path
-            self.add_recent_file("video", path)
-            print(f"CONTEXT: Video updated -> {path}")
+    def create_project(self, parent_folder, name):
+        """Crea una nuova cartella progetto strutturata."""
+        self.project_root = os.path.join(parent_folder, name)
+        
+        # Struttura Cartelle
+        os.makedirs(os.path.join(self.project_root, "assets", "models"), exist_ok=True)
+        os.makedirs(os.path.join(self.project_root, "assets", "profiles_aoi"), exist_ok=True)
+        os.makedirs(os.path.join(self.project_root, "assets", "profiles_toi"), exist_ok=True)
+        os.makedirs(os.path.join(self.project_root, "participants"), exist_ok=True)
+        
+        # Configurazione Iniziale
+        self.project_config = {
+            "name": name,
+            "created_at": str(pd.Timestamp.now()),
+            "hermes_version": "1.0",
+            "description": "Multi-participant eye-tracking project"
+        }
+        self.participants = []
+        self.current_participant = None
+        self.save_project()
+        self.save_global_config()
+        print(f"PROJECT: Created at {self.project_root}")
 
-    def initialize_project(self, folder_path):
-        """Crea la struttura delle cartelle e i file di default se non esistono."""
-        self.project_path = folder_path
+    def load_project(self, project_dir):
+        """Carica un progetto esistente e scansiona i partecipanti."""
+        config_path = os.path.join(project_dir, "hermes_project.json")
+        if not os.path.exists(config_path):
+            raise ValueError("Not a valid HERMES project folder (missing hermes_project.json).")
         
-        # Definisci sottocartelle
-        self.paths["root"] = folder_path
-        self.paths["input"] = os.path.join(folder_path, "Input")
-        self.paths["output"] = os.path.join(folder_path, "Output")
-        self.paths["profiles_toi"] = os.path.join(folder_path, "Profiles", "TOI")
-        self.paths["profiles_aoi"] = os.path.join(folder_path, "Profiles", "AOI")
-        self.paths["models"] = os.path.join(folder_path, "Models")
-
-        # Crea cartelle fisiche
-        for key, path in self.paths.items():
-            if key != "root" and not os.path.exists(path):
-                os.makedirs(path)
-                print(f"Created folder: {path}")
-
-        # Crea Profili Default (Se vuoti)
-        self._create_default_toi_profile()
-        # self._create_default_aoi_profile() # Opzionale, gestito da RegionView se manca
-        
-        # Scansiona file esistenti
-        self._scan_existing_files()
-        
-        self.save_config()
-        print(f"PROJECT INITIALIZED: {folder_path}")
-
-    def import_file(self, source_path, category="input"):
-        """Copia un file nella cartella del progetto."""
-        if not source_path or not os.path.exists(source_path): return None
-        
-        # Track recent data files
-        if source_path.lower().endswith(('.json', '.csv', '.mat', '.tsv', '.gz')):
-            self.add_recent_file("data", source_path)
-
-        filename = os.path.basename(source_path)
-        dest_folder = self.paths["input"] # Default a Input
-        
-        dest_path = os.path.join(dest_folder, filename)
-        
-        # Evita di copiare se è già lì
-        if os.path.abspath(source_path) == os.path.abspath(dest_path):
-            return dest_path
+        self.project_root = project_dir
+        with open(config_path, 'r') as f:
+            self.project_config = json.load(f)
             
-        try:
-            shutil.copy2(source_path, dest_path)
-            print(f"Imported: {filename}")
-            return dest_path
-        except Exception as e:
-            print(f"Import error {filename}: {e}")
-            return source_path
+        # Scansiona cartelle partecipanti
+        p_dir = os.path.join(self.project_root, "participants")
+        if os.path.exists(p_dir):
+            self.participants = [d for d in os.listdir(p_dir) if os.path.isdir(os.path.join(p_dir, d))]
+            self.participants.sort()
+            
+        # Imposta il primo come attivo se esiste
+        if self.participants:
+            self.set_active_participant(self.participants[0])
+            
+        self.save_global_config()
+        print(f"PROJECT: Loaded from {project_dir}. Found {len(self.participants)} participants.")
 
-    def _create_default_toi_profile(self):
-        # Crea un JSON di esempio se la cartella TOI è vuota
-        if not os.path.exists(self.paths["profiles_toi"]): return
-        if not os.listdir(self.paths["profiles_toi"]):
-            default_prof = {
-                "sync_logic": {"tobii_event_label": "DigIn", "matlab_anchor_column": "StudioEventData", "seconds_offset": 0.0},
-                "csv_structure": {"sequence_columns": [], "condition_column": "Condition"},
-                "phases_labels": ["Phase1", "Phase2"]
-            }
-            with open(os.path.join(self.paths["profiles_toi"], "Default_TOI.json"), 'w') as f:
-                json.dump(default_prof, f, indent=4)
+    def save_project(self):
+        """Salva lo stato del progetto (configurazione)."""
+        if not self.project_root: return
+        with open(os.path.join(self.project_root, "hermes_project.json"), 'w') as f:
+            json.dump(self.project_config, f, indent=4)
 
-    def _scan_existing_files(self):
-        """Scansiona ricorsivamente tutte le sottocartelle per popolare il contesto con file esistenti."""
-        if not self.project_path or not os.path.exists(self.project_path):
+    # ════════════════════════════════════════════════════════════════
+    # PARTICIPANT MANAGEMENT
+    # ════════════════════════════════════════════════════════════════
+
+    def add_participant(self, pid):
+        """Aggiunge un nuovo partecipante e crea le sue cartelle."""
+        if not self.project_root: return
+        if pid in self.participants:
+            print(f"PARTICIPANT: {pid} already exists.")
             return
 
-        print(f"CONTEXT: Recursive scan in {self.project_path}...")
+        p_path = os.path.join(self.project_root, "participants", pid)
+        os.makedirs(os.path.join(p_path, "input"), exist_ok=True)
+        os.makedirs(os.path.join(p_path, "output"), exist_ok=True)
+        
+        self.participants.append(pid)
+        self.participants.sort()
+        self.set_active_participant(pid)
+        print(f"PARTICIPANT: Created {pid}")
 
-        for root, _, files in os.walk(self.project_path):
-            for f in files:
-                f_path = os.path.join(root, f)
-                lower = f.lower()
-                
-                # 1. Video
-                if lower.endswith(('.mp4', '.avi', '.mov')):
-                    self.video_path = f_path
-                    print(f"CONTEXT: Video detected -> {f}")
-                
-                # 2. Pose Data (YOLO)
-                elif lower.endswith('_yolo.json.gz'):
-                    self.pose_data_path = f_path
-                    print(f"CONTEXT: Pose Data detected -> {f}")
+    def set_active_participant(self, pid):
+        """Cambia il focus del contesto su un altro partecipante."""
+        if pid in self.participants:
+            self.current_participant = pid
+            print(f"PARTICIPANT: Active changed to -> {pid}")
+            # Qui potremmo ricaricare dati specifici se necessario (es. cast specifico)
 
-                # 3. Gaze Data (Tobii) - .gz ma non yolo
-                elif lower.endswith('.gz') and not lower.endswith('_yolo.json.gz'):
-                    self.gaze_data_path = f_path
-                    print(f"CONTEXT: Gaze Data detected -> {f}")
+    # ════════════════════════════════════════════════════════════════
+    # DYNAMIC PATH RESOLUTION (The Magic)
+    # Espone proprietà compatibili con i vecchi script, ma che puntano
+    # dinamicamente alle cartelle del partecipante attivo.
+    # ════════════════════════════════════════════════════════════════
 
-                # 4. Identity Map
-                elif lower.endswith('_identity.json'):
-                    self.identity_map_path = f_path
-                    print(f"CONTEXT: Identity Map detected -> {f}")
+    def _get_active_input_dir(self):
+        if not self.project_root or not self.current_participant: return None
+        return os.path.join(self.project_root, "participants", self.current_participant, "input")
 
-                # 5. TOI
-                elif lower.endswith('.tsv'):
-                    self.toi_path = f_path
-                    print(f"CONTEXT: TOI detected -> {f}")
+    def _get_active_output_dir(self):
+        if not self.project_root or not self.current_participant: return None
+        return os.path.join(self.project_root, "participants", self.current_participant, "output")
 
-                # 6. Mapped CSV
-                elif 'mapped' in lower and lower.endswith('.csv'):
-                    self.mapped_csv_path = f_path
-                    print(f"CONTEXT: Mapped CSV detected -> {f}")
+    def _find_file(self, folder, extensions):
+        """Helper per trovare il primo file che matcha le estensioni."""
+        if not folder or not os.path.exists(folder): return None
+        for f in os.listdir(folder):
+            if f.lower().endswith(extensions):
+                return os.path.join(folder, f)
+        return None
 
-                # 7. AOI CSV
-                elif lower.endswith('.csv') and 'results' not in lower:
-                    self.aoi_csv_path = f_path
-                    print(f"CONTEXT: AOI CSV detected -> {f}")
+    # --- VIDEO (Read/Write) ---
+    @property
+    def video_path(self):
+        # Cerca video nella cartella input del partecipante attivo
+        return self._find_file(self._get_active_input_dir(), ('.mp4', '.avi', '.mov', '.mkv'))
+    
+    @video_path.setter
+    def video_path(self, path):
+        # Se viene settato un path esterno, lo copiamo/importiamo nel progetto?
+        # Per ora stampiamo solo un warning, l'import deve essere esplicito.
+        print(f"WARNING: Setting video_path directly is deprecated. Use import_file() instead.")
 
-                # 8. YOLO Model
-                elif lower.endswith('.pt'):
-                    self.yolo_model_path = f_path
-                    print(f"CONTEXT: YOLO Model detected -> {f}")
+    # --- GAZE DATA (Tobii .gz) ---
+    @property
+    def gaze_data_path(self):
+        # Attenzione: anche i file pose sono .gz, quindi escludiamo quelli che contengono "_yolo"
+        folder = self._get_active_input_dir()
+        if not folder or not os.path.exists(folder): return None
+        for f in os.listdir(folder):
+            if f.lower().endswith('.gz') and '_yolo' not in f.lower():
+                return os.path.join(folder, f)
+        return None
+        
+    @gaze_data_path.setter
+    def gaze_data_path(self, val): pass
+
+    # --- POSE DATA (YOLO Output) ---
+    @property
+    def pose_data_path(self):
+        # Cerca nell'output (se generato) o nell'input (se importato manualmente)
+        out_f = self._find_file(self._get_active_output_dir(), ('_yolo.json.gz',))
+        if out_f: return out_f
+        return self._find_file(self._get_active_input_dir(), ('_yolo.json.gz',))
+
+    @pose_data_path.setter
+    def pose_data_path(self, val): pass
+
+    # --- IDENTITY MAP ---
+    @property
+    def identity_map_path(self):
+        return self._find_file(self._get_active_output_dir(), ('_identity.json',))
+
+    @identity_map_path.setter
+    def identity_map_path(self, val): pass
+
+    # --- TOI FILE ---
+    @property
+    def toi_path(self):
+        # Cerca il TSV generato dal modulo MasterTOI nell'output
+        out_f = self._find_file(self._get_active_output_dir(), ('_tois.tsv',))
+        if out_f: return out_f
+        # Fallback all'input (se fornito manualmente)
+        return self._find_file(self._get_active_input_dir(), ('.tsv', '.txt'))
+
+    @toi_path.setter
+    def toi_path(self, val): pass
+
+    # --- AOI / MAPPED FILES ---
+    @property
+    def aoi_csv_path(self):
+        # Cerca file che finiscono con .csv ma NON contengono "mapped" o "results"
+        folder = self._get_active_output_dir()
+        if not folder: return None
+        for f in os.listdir(folder):
+            if f.endswith('.csv') and 'mapped' not in f.lower() and 'results' not in f.lower():
+                return os.path.join(folder, f)
+        return None
+        
+    @aoi_csv_path.setter
+    def aoi_csv_path(self, val): pass
+
+    @property
+    def mapped_csv_path(self):
+        return self._find_file(self._get_active_output_dir(), ('_mapped.csv',))
+
+    @mapped_csv_path.setter
+    def mapped_csv_path(self, val): pass
+
+    # --- DIZIONARIO PATHS (Compatibilità) ---
+    @property
+    def paths(self):
+        """Restituisce un dizionario compatibile con i vecchi script."""
+        if not self.project_root:
+            return {"profiles_aoi": "", "profiles_toi": "", "output": ""}
+        
+        return {
+            "profiles_aoi": os.path.join(self.project_root, "assets", "profiles_aoi"),
+            "profiles_toi": os.path.join(self.project_root, "assets", "profiles_toi"),
+            "models": os.path.join(self.project_root, "assets", "models"),
+            "output": self._get_active_output_dir() or ""
+        }
+
+    # ════════════════════════════════════════════════════════════════
+    # FILE IMPORT UTILITIES
+    # ════════════════════════════════════════════════════════════════
+
+    def import_file_for_participant(self, pid, source_path, file_type):
+        """
+        Importa un file (copia) nella cartella input del partecipante specificato.
+        file_type: 'video', 'gaze', 'toi'
+        """
+        if not self.project_root: return None
+        dest_dir = os.path.join(self.project_root, "participants", pid, "input")
+        if not os.path.exists(dest_dir): return None
+        
+        filename = os.path.basename(source_path)
+        dest_path = os.path.join(dest_dir, filename)
+        
+        try:
+            shutil.copy2(source_path, dest_path)
+            print(f"IMPORT: {filename} -> {pid}/input")
+            return dest_path
+        except Exception as e:
+            print(f"IMPORT ERROR: {e}")
+            return None
