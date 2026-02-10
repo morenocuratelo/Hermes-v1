@@ -54,7 +54,7 @@ if exist "venv" (
 )
 
 echo [HERMES] Creazione ambiente virtuale con Python 3.12...
-"%UV_CMD%" venv --python 3.12 venv
+"%UV_CMD%" venv --python 3.12 --seed venv
 if %errorlevel% neq 0 (
     echo ERRORE: Impossibile creare l'ambiente virtuale con Python 3.12.
     pause
@@ -71,11 +71,10 @@ if not exist "%VENV_PY%" (
 echo [HERMES] Installazione di pip nel venv tramite uv...
 "%UV_CMD%" pip install --python "%VENV_PY%" pip
 if %errorlevel% neq 0 (
-    echo ERRORE: Impossibile installare pip nel venv con uv.
-    pause
-    exit /b 1
+    echo AVVISO: Installazione esplicita di pip non riuscita. Procedo con uv pip.
 )
 
+echo [HERMES] Verifica Python nell'ambiente...
 for /f "tokens=2 delims= " %%V in ('"%VENV_PY%" --version 2^>^&1') do set "PY_VER=%%V"
 echo [HERMES] Python nell'ambiente: %PY_VER%
 echo %PY_VER% | findstr /b "3.12." >nul
@@ -86,19 +85,12 @@ if %errorlevel% neq 0 (
 )
 
 echo [HERMES] Installazione librerie (potrebbe richiedere tempo)...
-"%VENV_PY%" -m pip install --upgrade pip
-if %errorlevel% neq 0 (
-    echo ERRORE: Aggiornamento pip fallito.
-    pause
-    exit /b 1
-)
-
-"%VENV_PY%" -m pip install gdown
+"%UV_CMD%" pip install --python "%VENV_PY%" gdown
 if %errorlevel% neq 0 (
     echo AVVISO: gdown non installato. Usero fallback urllib nel downloader.
 )
 
-"%VENV_PY%" -m pip install -r requirements.txt
+"%UV_CMD%" pip install --python "%VENV_PY%" -r requirements.txt
 if %errorlevel% neq 0 (
     echo ERRORE: Installazione dipendenze da requirements.txt fallita.
     pause
