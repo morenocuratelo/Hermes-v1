@@ -5,6 +5,7 @@ import os
 import sys
 
 # Logic Imports
+import traceback
 import torch
 import cv2
 import json
@@ -20,9 +21,9 @@ from ultralytics import YOLO  # type: ignore
 # CONF_THRESHOLD: Conservative threshold to balance Precision and Recall.
 # IOU_THRESHOLD: Threshold for Non-Maximum Suppression (NMS).
 # MATCH_THRESHOLD: Specific for tracking association (e.g., BoT-SORT), determines how strictly detections are matched to existing tracks.
-CONF_THRESHOLD = 0.5
-IOU_THRESHOLD = 0.9 # Disabilitato (High Value): Il modello YOLO26 usa assegnamento one-to-one (sparse output), quindi l'NMS è ridondante. Impostiamo un valore alto per evitare soppressioni inutili e ridurre latenza.
-MATCH_THRESHOLD = 0.7 # quanto deve essere simile la nuova rilevazione rispetto alla previsione del movimento precedente per essere considerata la stessa persona.
+CONF_THRESHOLD = 0.6 # Manteniamo alto per purezza, come suggerito nel paper BoT-SORT originale
+IOU_THRESHOLD = 1.0 # CRITICO: YOLO26 è NMS-Free. Qualsiasi post-processing NMS è ridondante.
+MATCH_THRESHOLD = 0.8 # Standard BoT-SORT
 RANDOM_SEED = 42
 ULTRALYTICS_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/"
 # Sebbene questi valori siano stati scelti come default basati sulla letteratura (COCO benchmarks), il nostro strumento espone esplicitamente questi parametri all'utente tramite GUI, permettendo una regolazione fine (fine-tuning) specifica per le condizioni di illuminazione e densità della scena analizzata, superando i limiti di un approccio 'one-size-fits-all'.
@@ -81,7 +82,7 @@ class PoseEstimatorLogic:
             f"tracker_type: {params.get('tracker_type', 'botsort')}",
             f"track_high_thresh: {params.get('conf', 0.5)}",
             f"track_low_thresh: {params.get('low_thresh', 0.1)}",
-            f"new_track_thresh: {params.get('conf', 0.5)}",
+            f"new_track_thresh: {params.get('new_track_thresh', 0.7)}",
             f"track_buffer: {params.get('buffer', 30)}",
             f"match_thresh: {params.get('match', 0.8)}"
         ]
@@ -98,7 +99,7 @@ class PoseEstimatorLogic:
             reid_weights = params.get('reid_weights')
             if params.get('with_reid', False) and reid_weights:
                 lines.append("with_reid: True")
-                lines.append(f"model: {reid_weights}")
+                lines.append(f"model: '{reid_weights}'")
             elif params.get('with_reid', False):
                 lines.append("with_reid: True")
                 lines.append("model: osnet_x0_25_msmt17.pt")
@@ -171,7 +172,7 @@ class PoseEstimatorLogic:
         # 1. ReID Model Check
         reid_path = None
         if tracker_params.get('with_reid') and tracker_params.get('tracker_type') == 'botsort':
-            reid_name = "osnet_x0_25_msmt17.pt"
+            reid_name = tracker_params.get('reid_model_name', "osnet_x0_25_msmt17.pt")
             reid_path = os.path.join(models_dir, reid_name)
             
             if not os.path.exists(reid_path):
@@ -313,13 +314,15 @@ class YoloView:
         self.conf_threshold = tk.DoubleVar(value=CONF_THRESHOLD)
         self.iou_threshold = tk.DoubleVar(value=IOU_THRESHOLD)
         self.match_threshold = tk.DoubleVar(value=MATCH_THRESHOLD)
+        self.new_track_threshold = tk.DoubleVar(value=0.7)
         self.track_buffer = tk.IntVar(value=30) # Numero di frame per cui mantenere un ID attivo senza nuove detection (tracking "invisibile")
         
         # --- PARAMETRI AVANZATI TRACKER ---
         self.track_low_thresh = tk.DoubleVar(value=0.1) #Abbiamo adottato un approccio Two-Stage Association (ByteTrack strategy). La soglia bassa di 0.1 permette di mitigare l'occlusione temporanea (occlusion robustness), recuperando rilevazioni a bassa confidenza che sono spazialmente coerenti con le previsioni del filtro di Kalman, riducendo drasticamente i falsi negativi durante incroci complessi.
         self.proximity_thresh = tk.DoubleVar(value=0.5) #Il valore di 0.5 per la soglia di prossimità in BoT-SORT è stato scelto per bilanciare efficacemente la capacità del tracker di mantenere l'identità degli individui durante occlusioni parziali, senza essere troppo permissivo da causare errori di associazione (ID switch) in scenari affollati. Questo parametro, combinato con la soglia di apparenza, consente a BoT-SORT di distinguere tra individui vicini ma distinti, migliorando la robustezza complessiva del tracking.
         self.appearance_thresh = tk.DoubleVar(value=0.25) #La soglia di apparenza di 0.25 è stata scelta per bilanciare la sensibilità del tracker nel riconoscere caratteristiche distintive degli individui, riducendo i falsi positivi senza compromettere la capacità di mantenere l'identità durante occlusioni parziali.
-        self.with_reid = tk.BooleanVar(value=False)
+        self.with_reid = tk.BooleanVar(value=True)
+        self.reid_model_name = tk.StringVar(value="resnet50_msmt17_ready.pt")
         # "I valori sono stati scelti empiricamente basandosi sulle configurazioni di default del paper originale di BoT-SORT [Aharon et al., 2022], che hanno dimostrato robustezza su benchmark standard come MOT17 e MOT20."
         
         # --- SYNC CONTEXT (LETTURA) ---
@@ -358,6 +361,19 @@ class YoloView:
         self.cb_model.pack(side=tk.LEFT, padx=10)
         tk.Label(lf_conf, text="(Saved in: Project/Models)", fg="gray", bg="white").pack(side=tk.LEFT)
 
+        # ReID Model Selector
+        tk.Label(lf_conf, text="ReID Model:", bg="white").pack(side=tk.LEFT, padx=(15, 0))
+        
+        reid_defaults = ["osnet_x0_25_msmt17.pt", "osnet_ain_x1_0_ready.pt", "resnet50_msmt17_ready.pt"]
+        found_reid = []
+        if self.context and self.context.paths.get("models") and os.path.exists(self.context.paths["models"]):
+            found_reid = [f for f in os.listdir(self.context.paths["models"]) if f.endswith(".pt") and "yolo" not in f.lower()]
+        
+        reid_values = sorted(list(set(reid_defaults + found_reid)))
+        self.cb_reid = ttk.Combobox(lf_conf, textvariable=self.reid_model_name, values=reid_values, width=25)
+        self.cb_reid.pack(side=tk.LEFT, padx=5)
+        tk.Label(lf_conf, text="(Saved in: Project/Models)", fg="gray", bg="white").pack(side=tk.LEFT, padx=5)
+
         # 3b. Configurazione Tracking
         lf_track = tk.LabelFrame(self.parent, text="Tracking Parameters", padx=10, pady=10, bg="white")
         lf_track.pack(fill=tk.X, pady=5)
@@ -371,7 +387,7 @@ class YoloView:
         tk.Scale(lf_track, from_=0.1, to=0.95, resolution=0.05, orient=tk.HORIZONTAL, variable=self.conf_threshold, bg="white", length=100).pack(side=tk.LEFT)
 
         tk.Label(lf_track, text="IoU:", bg="white").pack(side=tk.LEFT, padx=(5, 5))
-        tk.Scale(lf_track, from_=0.1, to=0.95, resolution=0.05, orient=tk.HORIZONTAL, variable=self.iou_threshold, bg="white", length=100).pack(side=tk.LEFT)
+        tk.Scale(lf_track, from_=0.1, to=1.0, resolution=0.05, orient=tk.HORIZONTAL, variable=self.iou_threshold, bg="white", length=100).pack(side=tk.LEFT)
 
         tk.Label(lf_track, text="Match Thresh:", bg="white").pack(side=tk.LEFT, padx=(10, 5))
         tk.Scale(lf_track, from_=0.1, to=0.95, resolution=0.05, orient=tk.HORIZONTAL, variable=self.match_threshold, bg="white", length=100).pack(side=tk.LEFT)
@@ -448,6 +464,7 @@ class YoloView:
             tk.Scale(f, from_=from_, to=to_, resolution=res, orient=tk.HORIZONTAL, variable=var).pack(fill=tk.X)
 
         add_scale("Track Low Threshold (Low-confidence track recovery):", self.track_low_thresh, 0.01, 0.6, 0.01)
+        add_scale("New Track Threshold (Conservative init):", self.new_track_threshold, 0.1, 0.95, 0.05)
         add_scale("Proximity Threshold (BoT-SORT):", self.proximity_thresh, 0.1, 1.0, 0.05)
         add_scale("Appearance Threshold (BoT-SORT):", self.appearance_thresh, 0.1, 1.0, 0.05)
         
@@ -505,9 +522,11 @@ class YoloView:
                 "match": self.match_threshold.get(),
                 "buffer": self.track_buffer.get(),
                 "low_thresh": self.track_low_thresh.get(),
+                "new_track_thresh": self.new_track_threshold.get(),
                 "prox": self.proximity_thresh.get(),
                 "app": self.appearance_thresh.get(),
-                "with_reid": self.with_reid.get()
+                "with_reid": self.with_reid.get(),
+                "reid_model_name": self.reid_model_name.get()
             }
         }
         
@@ -524,7 +543,7 @@ class YoloView:
                 self.parent.after(0, lambda: messagebox.showinfo("Finished", "Analysis complete."))
             
         except Exception as e:
-            self._log_message(f"❌ CRITICAL ERROR: {str(e)}")
+            self._log_message(f"❌ CRITICAL ERROR: {str(e)}\n{traceback.format_exc()}")
             self.parent.after(0, lambda: messagebox.showerror("Error", f"Error during analysis:\n{str(e)}"))
             
         finally:

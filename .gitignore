@@ -8,3 +8,7 @@ prova3/
 prova4/
 GC/
 yolo26x-pose.pt
+*.pyc
+*.pt
+*.pth
+.DS_Store

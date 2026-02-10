@@ -96,11 +96,15 @@ class HermesUnifiedApp:
 
         # --- THEME SETUP ---
         if sv_ttk:
-            sv_ttk.set_theme("dark") # Modern scientific dark theme
+            sv_ttk.set_theme("dark") # Modern dark theme
             print("THEME: sv_ttk applied (Dark Mode)")
         
         self.context = AppContext()
         
+        # Schedule startup logic to run after mainloop starts
+        self.root.after(200, self._startup_sequence)
+
+    def _startup_sequence(self):
         # --- AUTO-LOAD CHECK ---
         if self.context.last_project and os.path.exists(self.context.last_project):
             if messagebox.askyesno("Resume Session", f"Resume last project?\n{self.context.last_project}"):
