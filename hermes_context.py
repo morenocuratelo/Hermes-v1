@@ -13,6 +13,7 @@ class AppContext:
 
         # Global Persistence (File di configurazione generale dell'app)
         self.config_file = "hermes_global_config.json"
+        self.default_config_file = "hermes_global_config.default.json"
         self.last_project = None
         self.recent_files = {"video": [], "data": []}
 
@@ -35,15 +36,45 @@ class AppContext:
     # GLOBAL APP CONFIG (Last opened project, etc.)
     # ════════════════════════════════════════════════════════════════
 
+    def _default_global_config(self):
+        return {
+            "last_project": None,
+            "recent_files": {"video": [], "data": []}
+        }
+
+    def _ensure_global_config_exists(self):
+        if os.path.exists(self.config_file):
+            return
+
+        try:
+            if os.path.exists(self.default_config_file):
+                shutil.copy2(self.default_config_file, self.config_file)
+                print(f"GLOBAL CONFIG: Created local config from '{self.default_config_file}'.")
+            else:
+                with open(self.config_file, 'w', encoding='utf-8') as f:
+                    json.dump(self._default_global_config(), f, indent=4)
+                print("GLOBAL CONFIG: Template missing, created a minimal local config.")
+        except Exception as e:
+            print(f"Global Config Init Error: {e}")
+
     def load_global_config(self):
+        self._ensure_global_config_exists()
+
         if os.path.exists(self.config_file):
             try:
-                with open(self.config_file, 'r') as f:
+                with open(self.config_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+                    if not isinstance(data, dict):
+                        raise ValueError("Invalid config format: expected JSON object.")
+
                     self.last_project = data.get("last_project")
                     self.recent_files = data.get("recent_files", {"video": [], "data": []})
+                    if not isinstance(self.recent_files, dict):
+                        self.recent_files = {"video": [], "data": []}
             except Exception as e:
                 print(f"Global Config Load Error: {e}")
+                self.last_project = None
+                self.recent_files = {"video": [], "data": []}
 
     def save_global_config(self):
         data = {
@@ -51,7 +82,7 @@ class AppContext:
             "recent_files": self.recent_files
         }
         try:
-            with open(self.config_file, 'w') as f:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4)
         except Exception as e:
             print(f"Global Config Save Error: {e}")
