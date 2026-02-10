@@ -1,8 +1,10 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+set "SETUP_VERSION=2026-02-11-uv3"
 
 echo [HERMES] Inizio configurazione automatica...
+echo [HERMES] Script: SETUP_LAB.bat ^| Versione: %SETUP_VERSION%
 
 set "UV_CMD="
 
