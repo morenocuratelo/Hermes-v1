@@ -353,7 +353,14 @@ class RegionView:
                         {"name": "Head", "kps": [0,1,2,3,4], "margin_px": v_head_m.get(), "expand_factor": 1.0},
                         {"name": "Body", "kps": [5,6,7,8,9,10,11,12,13,14], "margin_px": v_body_m.get(), "expand_factor": 1.0},
                         {"name": "Feet", "kps": [15,16], "margin_px": v_feet_m.get(), "expand_factor": 1.0, "offset_y_bottom": v_feet_off.get()},
-                        {"name": "Peripersonal", "kps": [5,6,11,12], "margin_px": 0, "expand_factor": v_peri_exp.get()}
+                        # Nuovo: kps=list(range(17)) (Tutto il corpo: 0-16)
+                        {
+                            "name": "Peripersonal", 
+                            "kps": list(range(17)), 
+                            "margin_px": 0, 
+                            "scale_w": v_peri_exp.get(),
+                            "scale_h": v_peri_exp.get()
+                        }
                     ]
                 elif strategy_code == 2: # Solo Box
                     return [{"name": "FullBody", "kps": list(range(17)), "margin_px": 20, "expand_factor": 1.0}]
@@ -398,28 +405,39 @@ class RegionView:
             lf = tk.LabelFrame(frame, text=f"AOI: {rule['name']}", pady=5, padx=5)
             lf.pack(fill=tk.X, pady=5)
             
-            # 1. Margine
-            tk.Label(lf, text="Margin (px):").grid(row=0, column=0)
+            # --- 1. Margine (Invariato) ---
+            tk.Label(lf, text="Margin (px):").grid(row=0, column=0, sticky="e")
             s_margin = tk.Scale(lf, from_=0, to=100, orient=tk.HORIZONTAL)
             s_margin.set(rule.get("margin_px", 0))
             s_margin.grid(row=0, column=1, sticky="ew")
             s_margin.bind("<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_margin: self.update_rule_val(r, i, "margin_px", s.get()))
             
-            # 2. Espansione
-            tk.Label(lf, text="Expansion (x):").grid(row=1, column=0)
-            s_exp = tk.Scale(lf, from_=1.0, to=4.0, resolution=0.1, orient=tk.HORIZONTAL)
-            s_exp.set(rule.get("expand_factor", 1.0))
-            s_exp.grid(row=1, column=1, sticky="ew")
-            s_exp.bind("<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_exp: self.update_rule_val(r, i, "expand_factor", s.get()))
+            # --- 2. WIDTH Scale (Sostituisce Expansion generico) ---
+            # Usa 'scale_w' se esiste, altrimenti fallback su 'expand_factor' o 1.0
+            cur_w = rule.get("scale_w", rule.get("expand_factor", 1.0))
+            
+            tk.Label(lf, text="Width Scale:", fg="#d32f2f").grid(row=1, column=0, sticky="e")
+            s_w = tk.Scale(lf, from_=0.5, to=4.0, resolution=0.1, orient=tk.HORIZONTAL, fg="#d32f2f")
+            s_w.set(cur_w)
+            s_w.grid(row=1, column=1, sticky="ew")
+            s_w.bind("<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_w: self.update_rule_val(r, i, "scale_w", s.get()))
 
-            # 3. (NUOVO) Offset Fondo - Solo se la regola lo prevede (es. Feet)
+            # --- 3. HEIGHT Scale ---
+            cur_h = rule.get("scale_h", rule.get("expand_factor", 1.0))
+            
+            tk.Label(lf, text="Height Scale:", fg="#1976d2").grid(row=2, column=0, sticky="e")
+            s_h = tk.Scale(lf, from_=0.5, to=4.0, resolution=0.1, orient=tk.HORIZONTAL, fg="#1976d2")
+            s_h.set(cur_h)
+            s_h.grid(row=2, column=1, sticky="ew")
+            s_h.bind("<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_h: self.update_rule_val(r, i, "scale_h", s.get()))
+
+            # --- 4. Offset Fondo (Solo se presente) ---
             if "offset_y_bottom" in rule:
-                tk.Label(lf, text="Bottom Extension:", fg="blue").grid(row=2, column=0)
-                s_off = tk.Scale(lf, from_=0, to=100, orient=tk.HORIZONTAL, fg="blue")
+                tk.Label(lf, text="Bottom Ext:", fg="gray").grid(row=3, column=0, sticky="e")
+                s_off = tk.Scale(lf, from_=0, to=100, orient=tk.HORIZONTAL, fg="gray")
                 s_off.set(rule.get("offset_y_bottom", 0))
-                s_off.grid(row=2, column=1, sticky="ew")
+                s_off.grid(row=3, column=1, sticky="ew")
                 s_off.bind("<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_off: self.update_rule_val(r, i, "offset_y_bottom", s.get()))
-
     def update_rule_val(self, role, idx, key, val):
         self.current_profile["roles"][role][idx][key] = val
         self.show_frame()
@@ -560,6 +578,9 @@ class RegionView:
     def calculate_box(self, kps_data, rule):
         indices = rule['kps']
         xs, ys = [], []
+        
+        # Filtro confidenza (invariato)
+        thresh = self.kp_conf_thresh.get()
         for i in indices:
             if i >= len(kps_data): continue
             pt = kps_data[i]
@@ -568,22 +589,48 @@ class RegionView:
                 if len(pt)>=2: x, y = pt[0], pt[1]
                 if len(pt)>=3: conf = pt[2]
                 else: conf = 1.0
-            thresh = self.kp_conf_thresh.get()
+            
             if conf > thresh and x > 1 and y > 1:
                 xs.append(x); ys.append(y)
         
         if not xs: return None
+        
+        # Calcolo base (Min/Max)
         min_x, max_x = min(xs), max(xs)
         min_y, max_y = min(ys), max(ys)
+        
+        # 1. Applicazione Margine Base (padding uniforme)
         m = int(rule.get('margin_px', 0))
-        min_x -= m; max_x += m; min_y -= m; max_y += m
-        if 'offset_y_bottom' in rule: max_y += int(rule['offset_y_bottom'])
-        f = float(rule.get('expand_factor', 1.0))
-        if f != 1.0:
-            w = max_x - min_x; h = max_y - min_y
-            cx, cy = min_x + w/2, min_y + h/2
-            min_x = cx - (w*f)/2; max_x = cx + (w*f)/2
-            min_y = cy - (h*f)/2; max_y = cy + (h*f)/2
+        min_x -= m; max_x += m
+        min_y -= m; max_y += m
+        
+        # 2. Offset Fondo (opzionale)
+        if 'offset_y_bottom' in rule: 
+            max_y += int(rule['offset_y_bottom'])
+
+        # --- NUOVA LOGICA: SCALATURA INDIPENDENTE ---
+        # Recupera i fattori X e Y (default a 1.0 se non esistono)
+        # Nota: Supportiamo ancora 'expand_factor' per retro-compatibilità dei vecchi profili
+        base_exp = float(rule.get('expand_factor', 1.0))
+        scale_w = float(rule.get('scale_w', base_exp)) 
+        scale_h = float(rule.get('scale_h', base_exp))
+        
+        # Calcolo larghezza/altezza attuali
+        w = max_x - min_x
+        h = max_y - min_y
+        cx = min_x + w / 2
+        cy = min_y + h / 2
+        
+        # Applicazione nuovi fattori
+        new_w = w * scale_w
+        new_h = h * scale_h
+        
+        # Ricalcolo coordinate dal centro
+        min_x = cx - new_w / 2
+        max_x = cx + new_w / 2
+        min_y = cy - new_h / 2
+        max_y = cy + new_h / 2
+        
         return (int(min_x), int(min_y), int(max_x), int(max_y))
 
     def show_frame(self):

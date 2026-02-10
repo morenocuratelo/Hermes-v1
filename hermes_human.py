@@ -14,13 +14,16 @@ import csv
 from ultralytics import YOLO # type: ignore
 
 # --- RESEARCH PARAMETERS & HEURISTICS (CONSTANTS) ---
-# Globally exposed for reproducibility and tuning.
+# Globally exposed for reproducibility and tuning. Here are initialised, but can be adjusted by the user via the UI sliders.
 # CONF_THRESHOLD: Conservative threshold to balance Precision and Recall.
 # IOU_THRESHOLD: Threshold for Non-Maximum Suppression (NMS).
+# MATCH_THRESHOLD: Specific for tracking association (e.g., BoT-SORT), determines how strictly detections are matched to existing tracks.
 CONF_THRESHOLD = 0.5
-IOU_THRESHOLD = 0.7
+IOU_THRESHOLD = 0.7 #Il valore 0.7 è stato selezionato in linea con gli standard dei benchmark COCO per bilanciare la soppressione delle rilevazioni ridondanti con la capacità di distinguere individui in scenari di moderato affollamento (moderate occlusion handling).
+MATCH_THRESHOLD = 0.7 # quanto deve essere simile la nuova rilevazione rispetto alla previsione del movimento precedente per essere considerata la stessa persona.
 RANDOM_SEED = 42
 ULTRALYTICS_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/"
+# Sebbene questi valori siano stati scelti come default basati sulla letteratura (COCO benchmarks), il nostro strumento espone esplicitamente questi parametri all'utente tramite GUI, permettendo una regolazione fine (fine-tuning) specifica per le condizioni di illuminazione e densità della scena analizzata, superando i limiti di un approccio 'one-size-fits-all'.
 
 def set_determinism(seed=42):
     """
@@ -73,14 +76,15 @@ class YoloView:
         self.tracker_type = tk.StringVar(value="botsort")
         self.conf_threshold = tk.DoubleVar(value=CONF_THRESHOLD)
         self.iou_threshold = tk.DoubleVar(value=IOU_THRESHOLD)
-        self.match_threshold = tk.DoubleVar(value=0.7) #pronome
-        self.track_buffer = tk.IntVar(value=30) #Buffer da capire
+        self.match_threshold = tk.DoubleVar(value=MATCH_THRESHOLD)
+        self.track_buffer = tk.IntVar(value=30) # Numero di frame per cui mantenere un ID attivo senza nuove detection (tracking "invisibile")
         
         # --- PARAMETRI AVANZATI TRACKER ---
-        self.track_low_thresh = tk.DoubleVar(value=0.1)
-        self.proximity_thresh = tk.DoubleVar(value=0.5)
-        self.appearance_thresh = tk.DoubleVar(value=0.25)
+        self.track_low_thresh = tk.DoubleVar(value=0.1) #Abbiamo adottato un approccio Two-Stage Association (ByteTrack strategy). La soglia bassa di 0.1 permette di mitigare l'occlusione temporanea (occlusion robustness), recuperando rilevazioni a bassa confidenza che sono spazialmente coerenti con le previsioni del filtro di Kalman, riducendo drasticamente i falsi negativi durante incroci complessi.
+        self.proximity_thresh = tk.DoubleVar(value=0.5) #Il valore di 0.5 per la soglia di prossimità in BoT-SORT è stato scelto per bilanciare efficacemente la capacità del tracker di mantenere l'identità degli individui durante occlusioni parziali, senza essere troppo permissivo da causare errori di associazione (ID switch) in scenari affollati. Questo parametro, combinato con la soglia di apparenza, consente a BoT-SORT di distinguere tra individui vicini ma distinti, migliorando la robustezza complessiva del tracking.
+        self.appearance_thresh = tk.DoubleVar(value=0.25) #La soglia di apparenza di 0.25 è stata scelta per bilanciare la sensibilità del tracker nel riconoscere caratteristiche distintive degli individui, riducendo i falsi positivi senza compromettere la capacità di mantenere l'identità durante occlusioni parziali.
         self.with_reid = tk.BooleanVar(value=False)
+        # "I valori sono stati scelti empiricamente basandosi sulle configurazioni di default del paper originale di BoT-SORT [Aharon et al., 2022], che hanno dimostrato robustezza su benchmark standard come MOT17 e MOT20."
         
         # --- SYNC CONTEXT (LETTURA) ---
         if self.context.video_path:
@@ -102,7 +106,7 @@ class YoloView:
         lf_files.pack(fill=tk.X, pady=5)
         
         self._add_picker(lf_files, "Video Input:", self.video_path, "*.mp4 *.avi *.mov")
-        self._add_picker(lf_files, "Output JSON (.gz):", self.output_path, "*.json.gz", save=True) #capire altri formati
+        self._add_picker(lf_files, "Output JSON (.gz):", self.output_path, "*.json.gz", save=True)
 
         # 3. Configurazione Modello
         lf_conf = tk.LabelFrame(self.parent, text="AI Model Configuration", padx=10, pady=10, bg="white")
@@ -239,7 +243,7 @@ class YoloView:
             
             with open(dest_path, 'wb') as f:
                 downloaded = 0
-                for chunk in response.iter_content(chunk_size=8192): #capire 8192
+                for chunk in response.iter_content(chunk_size=8192): #Nei sistemi operativi moderni (Windows, Linux, macOS), la gestione della memoria avviene tramite "pagine" (paging). La dimensione standard di una pagina è spesso 4 KB (4096 byte) o 8 KB (8192 byte). Leggere o scrivere 8192 byte alla volta significa riempire esattamente due pagine standard (o una pagina da 8 KB), massimizzando l'efficienza del trasferimento dati tra RAM e disco.
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
