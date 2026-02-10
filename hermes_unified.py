@@ -108,7 +108,7 @@ class HermesUnifiedApp:
         # --- AUTO-LOAD CHECK ---
         if self.context.last_project and os.path.exists(self.context.last_project):
             if messagebox.askyesno("Resume Session", f"Resume last project?\n{self.context.last_project}"):
-                self.context.initialize_project(self.context.last_project)
+                self.context.load_project(self.context.last_project)
                 self.start_main_ui()
                 return
 
@@ -117,7 +117,7 @@ class HermesUnifiedApp:
         
     def start_main_ui(self):
         self.root.deiconify() # Mostra finestra principale
-        self.root.title(f"H.E.R.M.E.S. | Progetto: {os.path.basename(self.context.project_path or '')}")
+        self.root.title(f"H.E.R.M.E.S. | Progetto: {os.path.basename(self.context.project_root or '')}")
         self.root.geometry("1600x900")
         self._setup_layout()
 
