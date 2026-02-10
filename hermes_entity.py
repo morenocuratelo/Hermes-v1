@@ -473,6 +473,7 @@ class IdentityView:  # <--- CAMBIATO NOME
 
         # --- NEW: SETTINGS BUTTON ---
         tk.Button(tools, text="⚙ Parameters", command=self.open_settings_dialog).pack(side=tk.RIGHT, padx=5)
+        tk.Button(tools, text="📜 Log", command=self.show_audit_log_window).pack(side=tk.RIGHT, padx=5)
         
         # FIRST ROW BUTTONS (Automations)
         row1 = tk.Frame(lbl_tracks)
@@ -523,8 +524,13 @@ class IdentityView:  # <--- CAMBIATO NOME
             root.bind(str(i), self._on_number)
         root.bind("<Control-z>", self.perform_undo)
 
-    def _is_hotkey_safe(self): # No change, just for context
-        # ...
+    def _is_hotkey_safe(self):
+        # Ensure view is visible and user is not typing
+        if not self.parent.winfo_viewable(): return False
+        focused = self.parent.focus_get()
+        if focused and focused.winfo_class() in ['Entry', 'Text', 'Spinbox', 'TEntry']:
+            return False
+        return True
 
     def _on_space(self, event):
         if self._is_hotkey_safe(): self.toggle_play()
@@ -552,7 +558,7 @@ class IdentityView:  # <--- CAMBIATO NOME
         try:
             idx = int(event.char) - 1
             if 0 <= idx < self.list_cast.size() and self.tree.selection():
-                self.assign_sel(self.list_cast.get(idx))
+                self.assign_role_to_selection(self.list_cast.get(idx))
         except ValueError: pass
 
     def _snapshot(self):
@@ -790,15 +796,35 @@ class IdentityView:  # <--- CAMBIATO NOME
         new_track_id, created_len_or_msg = self.logic.split_track(track_id_to_split, split_frame, keep_head)
 
         if new_track_id is None:
-            messagebox.showerror("Split Error", created_len_or_msg)
+            messagebox.showerror("Split Error", str(created_len_or_msg))
             return
 
-        created_len = created_len_or_msg
+        created_len = int(created_len_or_msg)
         if self.hide_short_var.get() and (created_len / self.fps) < 1.0:
             self.hide_short_var.set(False)
 
         self.refresh_tree()
         self.tree.selection_set(str(new_track_id)); self.tree.focus(str(new_track_id))
+
+    def show_audit_log_window(self):
+        logs = self.logic.get_audit_log()
+        win = tk.Toplevel(self.parent)
+        win.title("Audit Log Explorer")
+        win.geometry("600x400")
+
+        sb = ttk.Scrollbar(win)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        text = tk.Text(win, wrap="word", yscrollcommand=sb.set, font=("Consolas", 9))
+        text.pack(side=tk.LEFT, fill="both", expand=True)
+        sb.config(command=text.yview)
+
+        for entry in reversed(logs): # Dal più recente
+            ts = time.strftime('%H:%M:%S', time.localtime(entry['timestamp']))
+            text.insert("end", f"[{ts}] {entry['action']}\n")
+            text.insert("end", f"   Details: {entry['details']}\n\n")
+        
+        text.config(state="disabled")
 
     def refresh_tree(self):
         for i in self.tree.get_children(): self.tree.delete(i)
