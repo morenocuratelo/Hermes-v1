@@ -13,78 +13,62 @@ import shutil
 import time
 import threading
 import queue
+from typing import Optional, Dict, List, Tuple, Any, Set
+
 
 class HistoryManager:
-    def __init__(self, max_history=20, ram_buffer=5):
-        self.max_history = max_history
-        self.ram_buffer = ram_buffer
-        self.temp_dir = tempfile.mkdtemp(prefix="hermes_history_")
-        self.undo_stack = []
-        self.redo_stack = []
-        self.current_state = None  # Stores the current snapshot entry
+    def __init__(self, max_history: int = 20, ram_buffer: int = 5):
+        self.max_history: int = max_history
+        self.ram_buffer: int = ram_buffer
+        self.temp_dir: str = tempfile.mkdtemp(prefix="hermes_history_")
+        self.undo_stack: List[dict] = []
+        self.redo_stack: List[dict] = []
+        self.current_state: Optional[dict] = None
 
-    def push_state(self, data):
-        # 1. Create RAM Entry (Fast, no disk I/O)
-        # Use pickle.dumps to create a deep copy in RAM (bytes)
+    def push_state(self, data: Any) -> None:
         blob = pickle.dumps(data)
         timestamp = time.time_ns()
         new_entry = {'type': 'ram', 'blob': blob, 'timestamp': timestamp}
 
-        # 2. Push current to undo stack
         if self.current_state:
             self.undo_stack.append(self.current_state)
 
         self.current_state = new_entry
 
-        # 3. Clear Redo
         self._clear_stack(self.redo_stack)
         self.redo_stack = []
 
-        # 4. Manage RAM Buffer (Spill to disk if needed)
-        # We keep 'ram_buffer' amount of states in RAM (including current)
-        # The undo_stack has older states.
-        
-        # Total items in RAM we want = self.ram_buffer.
-        # self.current_state is in RAM.
-        # So we can keep (self.ram_buffer - 1) items in undo_stack as RAM.
-        
         ram_slots_for_stack = self.ram_buffer - 1
         if len(self.undo_stack) > ram_slots_for_stack:
-            # The item at this index is pushing out of the RAM window
             idx_to_spill = len(self.undo_stack) - 1 - ram_slots_for_stack
             if idx_to_spill >= 0:
                 self._spill_to_disk(self.undo_stack[idx_to_spill])
 
-        # 5. Enforce Max History (Delete oldest)
         if len(self.undo_stack) > self.max_history:
             oldest = self.undo_stack.pop(0)
             self._delete_entry(oldest)
 
-    def undo(self):
+    def undo(self) -> Optional[Any]:
         if not self.undo_stack:
             return None
 
-        # Current becomes Redo
         if self.current_state:
             self.redo_stack.append(self.current_state)
 
-        # Pop Undo becomes Current
         self.current_state = self.undo_stack.pop()
         return self._load_entry(self.current_state)
 
-    def redo(self):
+    def redo(self) -> Optional[Any]:
         if not self.redo_stack:
             return None
 
-        # Current becomes Undo
         if self.current_state:
             self.undo_stack.append(self.current_state)
 
-        # Pop Redo becomes Current
         self.current_state = self.redo_stack.pop()
         return self._load_entry(self.current_state)
 
-    def _spill_to_disk(self, entry):
+    def _spill_to_disk(self, entry: dict) -> None:
         if entry['type'] == 'ram':
             filename = os.path.join(self.temp_dir, f"state_{entry['timestamp']}.pkl")
             try:
@@ -92,11 +76,11 @@ class HistoryManager:
                     f.write(entry['blob'])
                 entry['type'] = 'disk'
                 entry['path'] = filename
-                entry['blob'] = None # Free RAM
+                entry['blob'] = None
             except Exception as e:
                 print(f"History Spill Error: {e}")
 
-    def _load_entry(self, entry):
+    def _load_entry(self, entry: dict) -> Optional[Any]:
         try:
             if entry['type'] == 'ram':
                 return pickle.loads(entry['blob'])
@@ -107,24 +91,23 @@ class HistoryManager:
             print(f"History Load Error: {e}")
             return None
 
-    def _delete_entry(self, entry):
+    def _delete_entry(self, entry: dict) -> None:
         if entry['type'] == 'disk' and os.path.exists(entry['path']):
             try: os.remove(entry['path'])
             except: pass
-        # If RAM, just let GC handle it
 
-    def _clear_stack(self, stack):
+    def _clear_stack(self, stack: List[dict]) -> None:
         for entry in stack:
             self._delete_entry(entry)
-        # Clear list in place
         del stack[:]
             
-    def __del__(self):
+    def __del__(self) -> None:
         try:
             if os.path.exists(self.temp_dir):
                 shutil.rmtree(self.temp_dir)
         except:
             pass
+
 
 class IdentityLogic:
     """
@@ -132,30 +115,30 @@ class IdentityLogic:
     data loading, track manipulation (merge, split), and algorithmic processing.
     This class is completely decoupled from the UI (Tkinter).
     """
-    def __init__(self, fps=30.0):
-        self.tracks = {}
-        self.id_lineage = {}
-        self.audit_log = []
-        self.fps = fps
-        self.lock = threading.RLock()
+    def __init__(self, fps: float = 30.0):
+        self.tracks: Dict[int, dict] = {}
+        self.id_lineage: Dict[int, int] = {}
+        self.audit_log: List[dict] = []
+        self.fps: float = fps
+        self.lock: threading.RLock = threading.RLock()
 
-    def set_fps(self, fps):
+    def set_fps(self, fps: float) -> None:
         self.fps = fps
 
-    def get_data(self):
+    def get_data(self) -> Tuple[Dict[int, dict], Dict[int, int]]:
         with self.lock:
             return self.tracks.copy(), self.id_lineage.copy()
 
-    def get_data_snapshot(self):
+    def get_data_snapshot(self) -> Tuple[Dict[int, dict], Dict[int, int]]:
         with self.lock:
             return self.tracks.copy(), self.id_lineage.copy()
 
-    def set_data(self, tracks, id_lineage):
+    def set_data(self, tracks: Dict[int, dict], id_lineage: Dict[int, int]) -> None:
         with self.lock:
             self.tracks = tracks
             self.id_lineage = id_lineage
 
-    def _log_operation(self, action, details):
+    def _log_operation(self, action: str, details: dict) -> None:
         entry = {
             "timestamp": time.time(),
             "action": action,
@@ -163,18 +146,19 @@ class IdentityLogic:
         }
         self.audit_log.append(entry)
 
-    def get_audit_log(self):
+    def get_audit_log(self) -> List[dict]:
         with self.lock:
             return list(self.audit_log)
 
-    def set_audit_log(self, log):
+    def set_audit_log(self, log: List[dict]) -> None:
         with self.lock:
             self.audit_log = log
 
-    def load_from_json_gz(self, path):
-        """Loads and parses track data from a YOLO .json.gz file."""
-        tracks = {}
-        id_lineage = {}
+    def load_from_json_gz(self, path: str) -> bool:
+        """Loads and parses track data from a YOLO .json.gz file.
+        Uses a temporary dict so partial/corrupt files don't pollute state."""
+        tmp_tracks: Dict[int, dict] = {}
+        tmp_lineage: Dict[int, int] = {}
         has_untracked = False
 
         with gzip.open(path, 'rt', encoding='utf-8') as f:
@@ -190,27 +174,28 @@ class IdentityLogic:
                         tid = 9000000 + (idx * 1000) + i
                         has_untracked = True
                     
-                    if tid not in tracks:
-                        tracks[tid] = {'frames':[], 'boxes':[], 'role':'Ignore', 'merged_from':[tid]}
-                        id_lineage[tid] = tid
-                    tracks[tid]['frames'].append(idx)
+                    if tid not in tmp_tracks:
+                        tmp_tracks[tid] = {'frames':[], 'boxes':[], 'role':'Ignore', 'merged_from':[tid]}
+                        tmp_lineage[tid] = tid
+                    tmp_tracks[tid]['frames'].append(idx)
                     b = det['box']
-                    tracks[tid]['boxes'].append([b['x1'], b['y1'], b['x2'], b['y2']])
+                    tmp_tracks[tid]['boxes'].append([b['x1'], b['y1'], b['x2'], b['y2']])
         
+        # Only commit if full parse succeeded (no exception above)
         with self.lock:
-            self.tracks = tracks
-            self.id_lineage = id_lineage
+            self.tracks = tmp_tracks
+            self.id_lineage = tmp_lineage
             self.audit_log = []
-            self._log_operation("Load Data", {"path": path, "track_count": len(tracks)})
+            self._log_operation("Load Data", {"path": path, "track_count": len(tmp_tracks)})
         return has_untracked
 
-    def assign_role_to_ids(self, ids, role):
+    def assign_role_to_ids(self, ids: List[int], role: str) -> None:
         with self.lock:
             for i in ids:
                 self.tracks[int(i)]['role'] = role
             self._log_operation("Assign Role", {"ids": ids, "role": role})
 
-    def merge_logic(self, master, slave):
+    def merge_logic(self, master: int, slave: int) -> None:
         with self.lock:
             if slave not in self.tracks or master not in self.tracks: return
             self.tracks[master]['frames'].extend(self.tracks[slave]['frames'])
@@ -223,12 +208,11 @@ class IdentityLogic:
             self.tracks[master]['frames'] = [x[0] for x in z]
             self.tracks[master]['boxes'] = [x[1] for x in z]
 
-    def manual_merge(self, ids, valid_roles=None):
+    def manual_merge(self, ids: List[Any], valid_roles: Optional[Dict] = None) -> int:
         with self.lock:
             ids = sorted([int(x) for x in ids])
             master = ids[0]
             
-            # Resolve role priority
             final_role = self.tracks[master]['role']
             if valid_roles:
                 for s in ids[1:]:
@@ -243,10 +227,10 @@ class IdentityLogic:
             self._log_operation("Manual Merge", {"master": master, "merged_ids": ids, "final_role": final_role})
             return master
 
-    def merge_all_by_role(self, cast):
+    def merge_all_by_role(self, cast: Dict[str, dict]) -> Tuple[int, List[str]]:
         with self.lock:
             merge_count = 0
-            roles_processed = []
+            roles_processed: List[str] = []
             for person_name in cast:
                 ids_with_role = [tid for tid, data in self.tracks.items() if data['role'] == person_name]
                 ids_with_role.sort()
@@ -259,7 +243,7 @@ class IdentityLogic:
             self._log_operation("Merge All By Role", {"merged_count": merge_count, "roles": roles_processed})
             return merge_count, roles_processed
 
-    def split_track(self, track_id_to_split, split_frame, keep_head):
+    def split_track(self, track_id_to_split: int, split_frame: int, keep_head: bool) -> Tuple[Optional[int], Any]:
         with self.lock:
             track_data = self.tracks.get(track_id_to_split)
             if not track_data: return None, "Track not found"
@@ -293,7 +277,7 @@ class IdentityLogic:
             self._log_operation("Split Track", {"original_id": track_id_to_split, "new_id": new_track_id, "frame": split_frame, "keep_head": keep_head})
             return new_track_id, created_len
 
-    def auto_stitch(self, lookahead, time_gap, stitch_dist):
+    def auto_stitch(self, lookahead: int, time_gap: float, stitch_dist: float) -> int:
         with self.lock:
             merged = 0
             changed = True
@@ -322,7 +306,7 @@ class IdentityLogic:
             self._log_operation("Auto Stitch", {"merged_count": merged, "params": {"lookahead": lookahead, "time_gap": time_gap, "stitch_dist": stitch_dist}})
             return merged
 
-    def absorb_noise(self, cast, noise_dist, time_gap):
+    def absorb_noise(self, cast: Dict[str, dict], noise_dist: float, time_gap: float) -> int:
         with self.lock:
             main_tracks = [tid for tid, d in self.tracks.items() if d['role'] in cast]
             candidates = [tid for tid, d in self.tracks.items() if d['role'] not in cast]
@@ -334,7 +318,7 @@ class IdentityLogic:
                     if main_id not in self.tracks: continue
                     main_data = self.tracks[main_id]
                     main_frames = sorted(main_data['frames'])
-                    to_remove = []
+                    to_remove: List[int] = []
                     for cand_id in candidates:
                         if cand_id not in self.tracks or not set(main_frames).isdisjoint(self.tracks[cand_id]['frames']): continue
                         cand_data = self.tracks[cand_id]
@@ -358,66 +342,84 @@ class IdentityLogic:
             self._log_operation("Absorb Noise", {"absorbed_count": absorbed, "params": {"noise_dist": noise_dist, "time_gap": time_gap}})
             return absorbed
 
-class IdentityView:  # <--- CAMBIATO NOME
-    def __init__(self, parent, context): # <--- NUOVI ARGOMENTI
-        self.parent = parent
+    def get_track_at_point(self, frame: int, x: int, y: int) -> Optional[int]:
+        """Returns the track ID whose bounding box contains (x, y) at the given frame.
+        If multiple overlap, returns the smallest box (most specific)."""
+        best_id: Optional[int] = None
+        best_area = float('inf')
+        for tid, d in self.tracks.items():
+            if frame in d['frames']:
+                idx = d['frames'].index(frame)
+                bx1, by1, bx2, by2 = d['boxes'][idx]
+                if bx1 <= x <= bx2 and by1 <= y <= by2:
+                    area = (bx2 - bx1) * (by2 - by1)
+                    if area < best_area:
+                        best_area = area
+                        best_id = tid
+        return best_id
+
+
+class IdentityView:
+    def __init__(self, parent: tk.Widget, context: Any):
+        self.parent: tk.Widget = parent
         self.context = context
         
-        # Rimuovi self.root.title e geometry, non servono più
-        
         # DATI
-        self.video_path = None
-        self.json_path = None
-        self.cap = None
-        self.fps = 30.0
-        self.logic = IdentityLogic(self.fps)
-        self.history = HistoryManager()
-        self.load_queue = queue.Queue()
+        self.video_path: Optional[str] = None
+        self.json_path: Optional[str] = None
+        self.cap: Optional[cv2.VideoCapture] = None
+        self.fps: float = 30.0
+        self.logic: IdentityLogic = IdentityLogic(self.fps)
+        self.history: HistoryManager = HistoryManager()
+        self.load_queue: queue.Queue = queue.Queue()
         
-        # --- PARAMETRI CONFIGURABILI (Invariati) ---
-        self.param_lookahead = 15      
-        self.param_time_gap = 2.0      
-        self.param_stitch_dist = 150   
-        self.param_noise_dist = 100    
-        # -------------------------------------------
+        # --- PARAMETRI CONFIGURABILI ---
+        self.param_lookahead: int = 15      
+        self.param_time_gap: float = 2.0      
+        self.param_stitch_dist: int = 150   
+        self.param_noise_dist: int = 100    
 
-        # CAST (Recupera dal CONTEXT se esiste, altrimenti usa default)
+        # CAST
         if self.context.cast:
-            self.cast = self.context.cast
+            self.cast: Dict[str, dict] = self.context.cast
         else:
             self.cast = {
                 "Target": {"color": (0, 255, 0)},       
                 "Confederate_1": {"color": (0, 0, 255)}, 
                 "Confederate_2": {"color": (255, 0, 0)}  
             }
-            self.context.cast = self.cast # Salva nel context per il futuro
+            self.context.cast = self.cast
 
-        self.hide_short_var = tk.BooleanVar(value=True)
-        self.current_frame = 0
-        self.total_frames = 0
-        self.is_playing = False
+        self.hide_short_var: tk.BooleanVar = tk.BooleanVar(value=True)
+        self.current_frame: int = 0
+        self.total_frames: int = 0
+        self.is_playing: bool = False
+
+        # Video display scaling state (for click-to-select)
+        self._video_offset_x: int = 0
+        self._video_offset_y: int = 0
+        self._video_scale: float = 1.0
+        self._video_orig_w: int = 0
+        self._video_orig_h: int = 0
 
         self._setup_ui()
         self._setup_hotkeys()
         
-        # AUTO-LOAD: If Human has finished, load data automatically
+        # AUTO-LOAD
         if self.context.video_path and self.context.pose_data_path:
             self.load_data_direct(self.context.video_path, self.context.pose_data_path)
 
         # --- AUTOSAVE INIT ---
-        self.AUTOSAVE_INTERVAL_MS = 300000 # 5 minutes
-        self.AUTOSAVE_FILENAME = "hermes_autosave_identity.json"
+        self.AUTOSAVE_INTERVAL_MS: int = 300000
+        self.AUTOSAVE_FILENAME: str = "hermes_autosave_identity.json"
         self._check_for_autosave()
         self._start_autosave_loop()
         
-        # Cleanup on exit
         self.parent.winfo_toplevel().protocol("WM_DELETE_WINDOW", self._on_close)
 
-    def _setup_ui(self):
-        # Header visivo
+    def _setup_ui(self) -> None:
         tk.Label(self.parent, text="2. Identity Assignment", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 10), anchor="w")
 
-        # Usa self.parent invece di self.root
         main = tk.PanedWindow(self.parent, orient=tk.HORIZONTAL)
         main.pack(fill=tk.BOTH, expand=True)
 
@@ -426,7 +428,15 @@ class IdentityView:  # <--- CAMBIATO NOME
         main.add(left, minsize=900)
         self.lbl_video = tk.Label(left, bg="black")
         self.lbl_video.pack(fill=tk.BOTH, expand=True)
+        # Bind click on video for synchronized selection
+        self.lbl_video.bind("<Button-1>", self._on_video_click)
         
+        # --- TIMELINE CANVAS ---
+        self.timeline_canvas = tk.Canvas(left, height=60, bg="#1e1e1e", highlightthickness=0)
+        self.timeline_canvas.pack(fill=tk.X, side=tk.BOTTOM)
+        self.timeline_canvas.bind("<Button-1>", self._on_timeline_click)
+        self.timeline_canvas.bind("<Configure>", lambda e: self._draw_timeline())
+
         ctrl = tk.Frame(left)
         ctrl.pack(fill=tk.X, side=tk.BOTTOM, pady=5)
         self.slider = ttk.Scale(ctrl, from_=0, to=100, orient=tk.HORIZONTAL, command=self.on_seek)
@@ -439,12 +449,12 @@ class IdentityView:  # <--- CAMBIATO NOME
         tk.Button(btns, text="📂 Load Mapping", command=self.load_mapping).pack(side=tk.LEFT, padx=5)
         tk.Button(btns, text="⏯ Play/Pause", command=self.toggle_play).pack(side=tk.LEFT, padx=5)
         tk.Button(btns, text="💾 SAVE MAPPING", bg="#4CAF50", fg="white", font=("bold"), command=self.save_mapping).pack(side=tk.LEFT, padx=20)
+
         # 2. GESTIONE (DX)
         right = tk.Frame(main, padx=5, pady=5)
         main.add(right, minsize=450)
         self.right_panel = right
 
-        # Progress Bar (Hidden)
         self.progress = ttk.Progressbar(right, mode='indeterminate')
 
         # A. CAST
@@ -463,31 +473,25 @@ class IdentityView:  # <--- CAMBIATO NOME
         lbl_tracks = tk.LabelFrame(right, text="2. YOLO & Tools Tracks", padx=5, pady=5)
         lbl_tracks.pack(fill=tk.BOTH, expand=True, pady=5)
         
-        # TOOLBAR
         tools = tk.Frame(lbl_tracks)
         tools.pack(fill=tk.X, pady=5)
         
-        # Checkbox hide short
         chk = tk.Checkbutton(tools, text="Hide short (<1s)", variable=self.hide_short_var, command=self.refresh_tree)
         chk.pack(side=tk.LEFT, padx=5)
 
-        # --- NEW: SETTINGS BUTTON ---
         tk.Button(tools, text="⚙ Parameters", command=self.open_settings_dialog).pack(side=tk.RIGHT, padx=5)
         tk.Button(tools, text="📜 Log", command=self.show_audit_log_window).pack(side=tk.RIGHT, padx=5)
         
-        # FIRST ROW BUTTONS (Automations)
         row1 = tk.Frame(lbl_tracks)
         row1.pack(fill=tk.X, pady=2)
         tk.Button(row1, text="⚡ Auto-Stitch", command=self.auto_stitch).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         tk.Button(row1, text="🧹 Absorb Noise (Gap Fill)", command=self.absorb_noise_logic).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         
-        # SECOND ROW BUTTONS (Merging)
         row2 = tk.Frame(lbl_tracks)
         row2.pack(fill=tk.X, pady=2)
         tk.Button(row2, text="🔗 Merge Selected", command=self.manual_merge).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         tk.Button(row2, text="🔗 Merge ALL by Role", bg="#d1e7dd", command=self.merge_all_by_role).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
-        # TREEVIEW
         cols = ("ID", "Origin", "Duration", "Assigned To")
         self.tree = ttk.Treeview(lbl_tracks, columns=cols, show="headings", selectmode="extended")
         self.tree.heading("ID", text="ID")
@@ -511,49 +515,170 @@ class IdentityView:  # <--- CAMBIATO NOME
         self.context_menu = tk.Menu(self.parent, tearoff=0)
         self.refresh_cast_list()
 
-    def _setup_hotkeys(self):
+    # ------------------------------------------------------------------ #
+    #  TIMELINE VISIVA                                                     #
+    # ------------------------------------------------------------------ #
+    def _draw_timeline(self) -> None:
+        """Draws horizontal colored bars on the timeline canvas showing
+        where each assigned track is active.  Unassigned ('Ignore') tracks
+        are drawn as thin grey lines; cast members use their assigned colour."""
+        c = self.timeline_canvas
+        c.delete("all")
+        if self.total_frames == 0 or not self.logic.tracks:
+            return
+
+        cw: int = c.winfo_width()
+        ch: int = c.winfo_height()
+        if cw < 10:
+            return  # not yet laid out
+
+        scale: float = cw / self.total_frames
+
+        # Collect tracks that belong to the cast first, then the rest
+        cast_tracks: List[Tuple[int, dict]] = []
+        other_tracks: List[Tuple[int, dict]] = []
+        for tid in sorted(self.logic.tracks.keys()):
+            d = self.logic.tracks[tid]
+            if d['role'] in self.cast:
+                cast_tracks.append((tid, d))
+            else:
+                other_tracks.append((tid, d))
+
+        # Assign a row to each cast role
+        role_order: List[str] = list(self.cast.keys())
+        n_roles = max(len(role_order), 1)
+        row_h = max(4, (ch - 14) // n_roles)  # leave room for playhead
+
+        # Draw "Ignore" tracks as thin grey background bars (all in row 0 area, semi-transparent)
+        for tid, d in other_tracks:
+            if not d['frames']:
+                continue
+            x0 = int(d['frames'][0] * scale)
+            x1 = max(x0 + 1, int(d['frames'][-1] * scale))
+            c.create_rectangle(x0, 0, x1, ch - 14, fill="#3a3a3a", outline="", stipple="gray25")
+
+        # Draw cast tracks as solid colored bars
+        for tid, d in cast_tracks:
+            if not d['frames']:
+                continue
+            role = d['role']
+            if role not in role_order:
+                continue
+            row_idx = role_order.index(role)
+            y0 = row_idx * row_h
+            y1 = y0 + row_h - 1
+
+            b, g, r = self.cast[role]['color']
+            hex_col = '#{:02x}{:02x}{:02x}'.format(r, g, b)
+
+            # Find contiguous segments to draw fewer rectangles
+            frames = d['frames']
+            seg_start = frames[0]
+            prev = frames[0]
+            for fi in range(1, len(frames)):
+                if frames[fi] > prev + 1:
+                    # end of segment
+                    x0 = int(seg_start * scale)
+                    x1 = max(x0 + 1, int(prev * scale))
+                    c.create_rectangle(x0, y0, x1, y1, fill=hex_col, outline="")
+                    seg_start = frames[fi]
+                prev = frames[fi]
+            # last segment
+            x0 = int(seg_start * scale)
+            x1 = max(x0 + 1, int(prev * scale))
+            c.create_rectangle(x0, y0, x1, y1, fill=hex_col, outline="")
+
+        # Draw playhead
+        px = int(self.current_frame * scale)
+        c.create_line(px, 0, px, ch, fill="white", width=2)
+
+        # Draw role labels
+        for i, role in enumerate(role_order):
+            y = i * row_h + row_h // 2
+            c.create_text(4, y, text=role, anchor="w", fill="white", font=("Segoe UI", 7))
+
+    def _on_timeline_click(self, event: tk.Event) -> None:
+        """Seek to the frame the user clicked on in the timeline."""
+        if self.total_frames == 0:
+            return
+        cw = self.timeline_canvas.winfo_width()
+        if cw <= 0:
+            return
+        frame = int(event.x / cw * self.total_frames)
+        frame = max(0, min(self.total_frames - 1, frame))
+        self.current_frame = frame
+        self.slider.set(self.current_frame)
+        self.show_frame()
+
+    # ------------------------------------------------------------------ #
+    #  SELEZIONE SINCRONIZZATA (click on video → select treeview)         #
+    # ------------------------------------------------------------------ #
+    def _on_video_click(self, event: tk.Event) -> None:
+        """When the user clicks on a bounding box in the video, select the
+        corresponding track in the Treeview."""
+        if not self.cap or self._video_scale == 0:
+            return
+
+        # Convert widget coords → original frame coords
+        orig_x = int((event.x - self._video_offset_x) / self._video_scale)
+        orig_y = int((event.y - self._video_offset_y) / self._video_scale)
+
+        # Bounds check
+        if orig_x < 0 or orig_y < 0 or orig_x > self._video_orig_w or orig_y > self._video_orig_h:
+            return
+
+        tid = self.logic.get_track_at_point(self.current_frame, orig_x, orig_y)
+        if tid is not None:
+            tid_str = str(tid)
+            # Check the item exists in tree (might be hidden)
+            if self.tree.exists(tid_str):
+                self.tree.selection_set(tid_str)
+                self.tree.focus(tid_str)
+                self.tree.see(tid_str)
+
+    # ------------------------------------------------------------------ #
+    #  HOTKEYS                                                             #
+    # ------------------------------------------------------------------ #
+    def _setup_hotkeys(self) -> None:
         root = self.parent.winfo_toplevel()
-        # Playback & Navigation
         root.bind("<Space>", self._on_space)
         root.bind("<Left>", self._on_left)
         root.bind("<Right>", self._on_right)
         root.bind("<Shift-Left>", self._on_shift_left)
         root.bind("<Shift-Right>", self._on_shift_right)
-        # Assignment 1-9
         for i in range(1, 10):
             root.bind(str(i), self._on_number)
         root.bind("<Control-z>", self.perform_undo)
 
-    def _is_hotkey_safe(self):
-        # Ensure view is visible and user is not typing
+    def _is_hotkey_safe(self) -> bool:
         if not self.parent.winfo_viewable(): return False
         focused = self.parent.focus_get()
         if focused and focused.winfo_class() in ['Entry', 'Text', 'Spinbox', 'TEntry']:
             return False
         return True
 
-    def _on_space(self, event):
+    def _on_space(self, event: tk.Event) -> None:
         if self._is_hotkey_safe(): self.toggle_play()
 
-    def _on_left(self, event):
+    def _on_left(self, event: tk.Event) -> None:
         if self._is_hotkey_safe(): self.seek_relative(-1)
     
-    def _on_right(self, event):
+    def _on_right(self, event: tk.Event) -> None:
         if self._is_hotkey_safe(): self.seek_relative(1)
 
-    def _on_shift_left(self, event):
+    def _on_shift_left(self, event: tk.Event) -> None:
         if self._is_hotkey_safe(): self.seek_relative(-10)
 
-    def _on_shift_right(self, event):
+    def _on_shift_right(self, event: tk.Event) -> None:
         if self._is_hotkey_safe(): self.seek_relative(10)
 
-    def seek_relative(self, delta):
+    def seek_relative(self, delta: int) -> None:
         if not self.cap: return
         self.current_frame = max(0, min(self.total_frames - 1, self.current_frame + delta))
         self.slider.set(self.current_frame)
         self.show_frame()
 
-    def _on_number(self, event):
+    def _on_number(self, event: tk.Event) -> None:
         if not self._is_hotkey_safe(): return
         try:
             idx = int(event.char) - 1
@@ -561,11 +686,11 @@ class IdentityView:  # <--- CAMBIATO NOME
                 self.assign_role_to_selection(self.list_cast.get(idx))
         except ValueError: pass
 
-    def _snapshot(self):
+    def _snapshot(self) -> None:
         tracks, id_lineage = self.logic.get_data()
         self.history.push_state((tracks, id_lineage))
 
-    def perform_undo(self, event=None):
+    def perform_undo(self, event: Optional[tk.Event] = None) -> None:
         prev_state = self.history.undo()
         if prev_state is not None:
             tracks, id_lineage = prev_state
@@ -574,13 +699,13 @@ class IdentityView:  # <--- CAMBIATO NOME
             self.show_frame()
             print("Undo performed.")
     
-    def _start_autosave_loop(self):
+    def _start_autosave_loop(self) -> None:
         try:
             self.parent.after(self.AUTOSAVE_INTERVAL_MS, self._perform_autosave)
         except Exception:
             pass # Widget destroyed
 
-    def _perform_autosave(self):
+    def _perform_autosave(self) -> None:
         tracks, lineage = self.logic.get_data_snapshot()
         audit_log = self.logic.get_audit_log()
         if not tracks:
@@ -589,7 +714,7 @@ class IdentityView:  # <--- CAMBIATO NOME
 
         save_path = self._get_autosave_path()
 
-        def save_task(data_to_save, filepath):
+        def save_task(data_to_save: dict, filepath: str) -> None:
             try:
                 tmp_path = filepath + ".tmp"
                 with open(tmp_path, 'w') as f:
@@ -608,12 +733,12 @@ class IdentityView:  # <--- CAMBIATO NOME
         threading.Thread(target=save_task, args=(data_to_save, save_path), daemon=True).start()
         self._start_autosave_loop()
 
-    def _get_autosave_path(self):
+    def _get_autosave_path(self) -> str:
         if self.context and self.context.project_path:
             return os.path.join(self.context.project_path, self.AUTOSAVE_FILENAME)
         return self.AUTOSAVE_FILENAME
 
-    def _check_for_autosave(self):
+    def _check_for_autosave(self) -> None:
         path = self._get_autosave_path()
         if os.path.exists(path):
             if messagebox.askyesno("Recovery", "Found an autosave file from a previous session.\nDo you want to restore it?"):
@@ -621,7 +746,6 @@ class IdentityView:  # <--- CAMBIATO NOME
                     with open(path, 'r') as f:
                         saved_data = json.load(f)
 
-                    # Handle old (dict) and new ({'tracks':...}) format
                     if 'tracks' in saved_data and 'id_lineage' in saved_data:
                         tracks_data, lineage_data = saved_data['tracks'], saved_data['id_lineage']
                         audit_data = saved_data.get('audit_log', [])
@@ -632,7 +756,6 @@ class IdentityView:  # <--- CAMBIATO NOME
                     tracks = {int(k): v for k, v in tracks_data.items()}
                     id_lineage = {int(k): v for k, v in lineage_data.items()}
 
-                    # For backward compatibility, rebuild lineage if not present
                     if not id_lineage:
                         for tid, d in tracks.items():
                             id_lineage[tid] = tid
@@ -652,27 +775,24 @@ class IdentityView:  # <--- CAMBIATO NOME
                 try: os.remove(path)
                 except: pass
 
-    def _on_close(self):
+    def _on_close(self) -> None:
         path = self._get_autosave_path()
         if os.path.exists(path):
             try: os.remove(path)
             except: pass
         self.parent.winfo_toplevel().destroy()
 
-    # --- NEW FEATURE: SETTINGS DIALOG ---
-    def open_settings_dialog(self):
+    def open_settings_dialog(self) -> None:
         """Opens a popup window to modify hardcoded parameters."""
         win = tk.Toplevel(self.parent)
         win.title("Algorithm Settings")
         win.geometry("350x250")
         
-        # Temporary variables
         v_lookahead = tk.IntVar(value=self.param_lookahead)
         v_time = tk.DoubleVar(value=self.param_time_gap)
         v_s_dist = tk.IntVar(value=self.param_stitch_dist)
         v_n_dist = tk.IntVar(value=self.param_noise_dist)
         
-        # Layout
         tk.Label(win, text="1. Auto-Stitching", font=("bold")).pack(pady=(10,5))
         
         f1 = tk.Frame(win); f1.pack(fill=tk.X, padx=20)
@@ -693,7 +813,7 @@ class IdentityView:  # <--- CAMBIATO NOME
         tk.Label(f4, text="Precision Dist (px):").pack(side=tk.LEFT)
         tk.Entry(f4, textvariable=v_n_dist, width=8).pack(side=tk.RIGHT)
         
-        def save():
+        def save() -> None:
             self.param_lookahead = v_lookahead.get()
             self.param_time_gap = v_time.get()
             self.param_stitch_dist = v_s_dist.get()
@@ -703,9 +823,7 @@ class IdentityView:  # <--- CAMBIATO NOME
 
         tk.Button(win, text="Save", command=save, bg="#4CAF50", fg="white").pack(pady=15)
 
-    # --- UPDATED LOGIC WITH PARAMETERS ---
-
-    def absorb_noise_logic(self):
+    def absorb_noise_logic(self) -> None:
         """Supervised Noise Absorption using configurable parameters."""
         if not messagebox.askyesno("Confirm", f"Absorb noise (Dist < {self.param_noise_dist}px)? This cannot be undone in one step."): return
         self._snapshot()
@@ -715,7 +833,7 @@ class IdentityView:  # <--- CAMBIATO NOME
         self.refresh_tree()
         messagebox.showinfo("Info", f"Assorbiti {absorbed} frammenti.")
 
-    def auto_stitch(self):
+    def auto_stitch(self) -> None:
         """Unsupervised Auto-Stitching using configurable parameters."""
         if not messagebox.askyesno("Confirm", "Run auto-stitching? This may merge unrelated tracks and cannot be undone in one step."): return
         self._snapshot()
@@ -728,8 +846,7 @@ class IdentityView:  # <--- CAMBIATO NOME
         self.refresh_tree()
         messagebox.showinfo("Info", f"Stitched {merged} fragments (Lookahead:{p_win}, Time:{p_time}s, Dist:{p_dist}px).")
 
-    # --- STANDARD METHODS (Unchanged) ---
-    def merge_all_by_role(self):
+    def merge_all_by_role(self) -> None:
         if not messagebox.askyesno("Confirm", "Do you want to merge all tracks assigned to the same role?"): return
         self._snapshot()
         merge_count, roles_processed = self.logic.merge_all_by_role(self.cast)
@@ -738,22 +855,18 @@ class IdentityView:  # <--- CAMBIATO NOME
         else: msg = "No merges necessary."
         messagebox.showinfo("Merge Result", msg)
 
-    def manual_merge(self):
+    def manual_merge(self) -> None:
         sel = self.tree.selection()
         if len(sel) < 2: return
         self._snapshot()
         
-        master = self.logic.manual_merge(sel, self.cast)
+        master = self.logic.manual_merge(list(sel), self.cast)
 
         self.refresh_tree()
         self.tree.selection_set(str(master))
 
-    def split_track_at_current_frame(self):
-        """
-        Splits a selected track into two at the current video frame.
-        The second part of the track gets a new ID.
-        """
-        # 1. Validation
+    def split_track_at_current_frame(self) -> None:
+        """Splits a selected track into two at the current video frame."""
         selection = self.tree.selection()
         first = next(iter(selection), None)
         if first is None:
@@ -761,7 +874,6 @@ class IdentityView:  # <--- CAMBIATO NOME
             return
         track_id_to_split = int(first)
 
-        
         if len(selection) > 1:
             messagebox.showwarning("Warning", "Select only one track to split.")
             return
@@ -771,19 +883,15 @@ class IdentityView:  # <--- CAMBIATO NOME
         track_data = self.logic.tracks.get(track_id_to_split)
         if not track_data: return
 
-        # Early exit checks are now inside the logic, but we can keep them here for UI feedback
         if split_frame <= track_data['frames'][0] or split_frame > track_data['frames'][-1]:
             messagebox.showinfo("Info", "Cannot split at the very start or after the end of a track.")
             return
 
-        # 2. Data Slicing
         try:
-            # Find the index of the first frame >= split_frame
             split_index = next(i for i, f in enumerate(track_data['frames']) if f >= split_frame)
         except StopIteration:
-            return # Should be caught by the check above, but for safety
+            return
 
-        # --- ASK USER PREFERENCE ---
         msg = (f"Splitting track {track_id_to_split} at frame {split_frame}.\n\n"
                "Which part should KEEP the original ID and Role?\n"
                "YES = The PREVIOUS part (up to the cursor)\n"
@@ -792,7 +900,6 @@ class IdentityView:  # <--- CAMBIATO NOME
 
         self._snapshot()
 
-        # 3. Delegate to logic
         new_track_id, created_len_or_msg = self.logic.split_track(track_id_to_split, split_frame, keep_head)
 
         if new_track_id is None:
@@ -806,7 +913,7 @@ class IdentityView:  # <--- CAMBIATO NOME
         self.refresh_tree()
         self.tree.selection_set(str(new_track_id)); self.tree.focus(str(new_track_id))
 
-    def show_audit_log_window(self):
+    def show_audit_log_window(self) -> None:
         logs = self.logic.get_audit_log()
         win = tk.Toplevel(self.parent)
         win.title("Audit Log Explorer")
@@ -819,14 +926,14 @@ class IdentityView:  # <--- CAMBIATO NOME
         text.pack(side=tk.LEFT, fill="both", expand=True)
         sb.config(command=text.yview)
 
-        for entry in reversed(logs): # Dal più recente
+        for entry in reversed(logs):
             ts = time.strftime('%H:%M:%S', time.localtime(entry['timestamp']))
             text.insert("end", f"[{ts}] {entry['action']}\n")
             text.insert("end", f"   Details: {entry['details']}\n\n")
         
         text.config(state="disabled")
 
-    def refresh_tree(self):
+    def refresh_tree(self) -> None:
         for i in self.tree.get_children(): self.tree.delete(i)
         hide = self.hide_short_var.get()
         for tid in sorted(self.logic.tracks.keys()):
@@ -845,16 +952,19 @@ class IdentityView:  # <--- CAMBIATO NOME
         for n in self.cast:
             b,g,r = self.cast[n]['color']
             self.tree.tag_configure(n, background='#{:02x}{:02x}{:02x}'.format(min(r+180,255), min(g+180,255), min(b+180,255)))
+        
+        # Redraw timeline whenever tree data changes
+        self._draw_timeline()
 
-    def browse_video(self):
+    def browse_video(self) -> None:
         v = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.avi *.mov")]) 
         if v: self.load_data_direct(v, self.json_path)
 
-    def browse_pose(self):
+    def browse_pose(self) -> None:
         j = filedialog.askopenfilename(filetypes=[("Pose JSON", "*.json.gz")])
         if j: self.load_data_direct(self.video_path, j)
 
-    def load_data_direct(self, video_path, json_path):
+    def load_data_direct(self, video_path: Optional[str], json_path: Optional[str]) -> None:
         if video_path:
             self.video_path = video_path
             self.context.video_path = video_path
@@ -871,7 +981,6 @@ class IdentityView:  # <--- CAMBIATO NOME
             self.slider.config(to=self.total_frames-1)
         
         if self.json_path and os.path.exists(self.json_path):
-            # Async Load
             siblings = [c for c in self.right_panel.winfo_children() if c != self.progress]
             if siblings:
                 self.progress.pack(fill=tk.X, pady=5, side=tk.TOP, before=siblings[0])
@@ -884,14 +993,14 @@ class IdentityView:  # <--- CAMBIATO NOME
             self.refresh_tree()
             self.show_frame()
 
-    def _load_json_thread_refactored(self, path):
+    def _load_json_thread_refactored(self, path: str) -> None:
         try:
             has_untracked = self.logic.load_from_json_gz(path)
             self.load_queue.put(("success", has_untracked))
         except Exception as e:
             self.load_queue.put(("error", str(e)))
 
-    def _check_load_queue(self):
+    def _check_load_queue(self) -> None:
         try:
             msg = self.load_queue.get_nowait()
             status = msg[0]
@@ -913,7 +1022,7 @@ class IdentityView:  # <--- CAMBIATO NOME
         except queue.Empty:
             self.parent.after(100, self._check_load_queue)
 
-    def load_mapping(self):
+    def load_mapping(self) -> None:
         if not self.logic.tracks:
             messagebox.showwarning("Warning", "Load video and pose data before loading an identity mapping.")
             return
@@ -926,7 +1035,7 @@ class IdentityView:  # <--- CAMBIATO NOME
                 mapping = json.load(file)
             
             loaded_count = 0
-            new_roles = set()
+            new_roles: Set[str] = set()
             
             for tid_str, role in mapping.items():
                 tid = int(tid_str)
@@ -936,7 +1045,6 @@ class IdentityView:  # <--- CAMBIATO NOME
                     if role not in self.cast and role != "Ignore":
                         new_roles.add(role)
             
-            # Add new roles to the cast if they don't exist
             for role in new_roles:
                 self.cast[role] = {"color": (random.randint(50, 200), random.randint(50, 200), random.randint(50, 200))}
             
@@ -944,7 +1052,6 @@ class IdentityView:  # <--- CAMBIATO NOME
             self.refresh_tree()
             self.show_frame()
             
-            # Update context
             if self.context:
                 self.context.identity_map_path = f
                 
@@ -953,7 +1060,7 @@ class IdentityView:  # <--- CAMBIATO NOME
         except Exception as e:
             messagebox.showerror("Error", f"Unable to load the file:\n{e}")
 
-    def save_mapping(self):
+    def save_mapping(self) -> None:
         if not self.json_path: return
 
         base_name = os.path.basename(self.json_path).replace(".json.gz", "_identity.json")
@@ -962,10 +1069,7 @@ class IdentityView:  # <--- CAMBIATO NOME
         else:
             out = self.json_path.replace(".json.gz", "_identity.json")
 
-        # --- CRITICAL FIX: Use id_lineage instead of tracks ---
-        # This ensures that if ID 10 was merged into ID 5, 
-        # the JSON will also include "10": "RoleOf5", not just "5": "RoleOf5".
-        mapping = {} # Using logic's data now
+        mapping: Dict[int, str] = {}
         for original_id, current_master in self.logic.id_lineage.items():
             if current_master in self.logic.tracks:
                 role = self.logic.tracks[current_master]['role']
@@ -979,7 +1083,6 @@ class IdentityView:  # <--- CAMBIATO NOME
             self.context.identity_map_path = out
             print(f"CONTEXT: Identity Map updated -> {out}")
 
-        # --- AUDIT LOG SAVE ---
         audit_out = out.replace("_identity.json", "_audit.json")
         try:
             with open(audit_out, 'w') as f:
@@ -991,18 +1094,18 @@ class IdentityView:  # <--- CAMBIATO NOME
         count = len(mapping)
         messagebox.showinfo("Done", f"Mapped {count} IDs (including merged historical IDs).\nSaved to: {out}\nAudit Log: {os.path.basename(audit_out)}")
 
-    def refresh_cast_list(self):
+    def refresh_cast_list(self) -> None:
         self.list_cast.delete(0, tk.END)
         for n in self.cast:
             self.list_cast.insert(tk.END, n)
             b,g,r = self.cast[n]['color']
             self.list_cast.itemconfig(self.list_cast.size()-1, bg='#{:02x}{:02x}{:02x}'.format(r,g,b))
             
-    def add_person(self):
+    def add_person(self) -> None:
         n = simpledialog.askstring("New", "Name:")
         if n: self.cast[n] = {"color":(random.randint(50,200),random.randint(50,200),random.randint(50,200))}; self.refresh_cast_list()
     
-    def remove_person(self):
+    def remove_person(self) -> None:
         s = self.list_cast.curselection()
         if s: 
             n = self.list_cast.get(s[0])
@@ -1011,7 +1114,7 @@ class IdentityView:  # <--- CAMBIATO NOME
                 if t['role'] == n: t['role'] = 'Ignore'
             self.refresh_cast_list(); self.refresh_tree()
             
-    def change_person_color(self):
+    def change_person_color(self) -> None:
         s = self.list_cast.curselection()
         if not s: return
 
@@ -1025,7 +1128,7 @@ class IdentityView:  # <--- CAMBIATO NOME
                 self.cast[n]['color'] = (b,g,r)
                 self.refresh_cast_list(); self.show_frame()
 
-    def show_context_menu(self, e):
+    def show_context_menu(self, e: tk.Event) -> None:
         i = self.tree.identify_row(e.y)
         if i:
             if i not in self.tree.selection(): self.tree.selection_set(i)
@@ -1038,23 +1141,24 @@ class IdentityView:  # <--- CAMBIATO NOME
             self.context_menu.add_command(label="✂️ Split at Current Frame", command=self.split_track_at_current_frame)
             self.context_menu.post(e.x_root, e.y_root)
 
-    def assign_role_to_selection(self, role):
+    def assign_role_to_selection(self, role: str) -> None:
         selected_ids = [int(i) for i in self.tree.selection()]
         self.logic.assign_role_to_ids(selected_ids, role)
         self.refresh_tree(); self.show_frame()
 
-    def on_tree_select(self, e):
+    def on_tree_select(self, e: tk.Event) -> None:
         s = self.tree.selection()
         if s: self.current_frame = self.logic.tracks[int(s[0])]['frames'][0]; self.slider.set(self.current_frame); self.show_frame()
 
-    def on_seek(self, v): self.current_frame = int(float(v)); self.show_frame()
+    def on_seek(self, v: str) -> None:
+        self.current_frame = int(float(v)); self.show_frame()
 
-    def toggle_play(self):
+    def toggle_play(self) -> None:
         self.is_playing = not self.is_playing
         if self.is_playing:
             self.play_loop()
 
-    def play_loop(self):
+    def play_loop(self) -> None:
         if self.is_playing and self.cap:
             start_t = time.time()
             self.current_frame += 1
@@ -1067,16 +1171,18 @@ class IdentityView:  # <--- CAMBIATO NOME
             wait = max(1, int((1000/self.fps) - dt))
             self.parent.after(wait, self.play_loop)
             
-    def show_frame(self):
+    def show_frame(self) -> None:
         if not self.cap: return
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
         ret, frame = self.cap.read()
         if not ret: return
+
+        self._video_orig_h, self._video_orig_w = frame.shape[:2]
+
         hide = self.hide_short_var.get()
         for tid, d in self.logic.tracks.items():
             if self.current_frame in d['frames']:
                 role = d['role']
-                # if hide and len(d['frames'])/self.fps < 1.0 and role not in self.cast: continue 
                 idx = d['frames'].index(self.current_frame)
                 box = d['boxes'][idx]
                 col = (100,100,100)
@@ -1086,6 +1192,27 @@ class IdentityView:  # <--- CAMBIATO NOME
                 cv2.putText(frame, f"{tid} {role if role!='Ignore' else ''}", (x1,y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, col, 2)
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(frame)
-        img.thumbnail((self.lbl_video.winfo_width(), self.lbl_video.winfo_height()))
+
+        # Compute thumbnail scale + offsets for click mapping
+        disp_w = self.lbl_video.winfo_width()
+        disp_h = self.lbl_video.winfo_height()
+        if disp_w > 1 and disp_h > 1:
+            scale_x = disp_w / self._video_orig_w
+            scale_y = disp_h / self._video_orig_h
+            self._video_scale = min(scale_x, scale_y)
+            thumb_w = int(self._video_orig_w * self._video_scale)
+            thumb_h = int(self._video_orig_h * self._video_scale)
+            self._video_offset_x = (disp_w - thumb_w) // 2
+            self._video_offset_y = (disp_h - thumb_h) // 2
+            img = img.resize((thumb_w, thumb_h), Image.Resampling.LANCZOS)
+        else:
+            img.thumbnail((disp_w, disp_h))
+            self._video_scale = 1.0
+            self._video_offset_x = 0
+            self._video_offset_y = 0
+
         self.tk_img = ImageTk.PhotoImage(image=img)
         self.lbl_video.config(image=self.tk_img)
+
+        # Update timeline playhead
+        self._draw_timeline()
