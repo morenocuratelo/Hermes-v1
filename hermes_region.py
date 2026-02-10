@@ -557,7 +557,7 @@ class RegionView:
 
     def _setup_hotkeys(self):
         root = self.parent.winfo_toplevel()
-        root.bind("<Space>",       self._on_space)
+        root.bind("<space>",       self._on_space)
         root.bind("<Left>",        self._on_left)
         root.bind("<Right>",       self._on_right)
         root.bind("<Shift-Left>",  self._on_shift_left)

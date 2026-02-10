@@ -100,38 +100,18 @@ class GazeLogic:
 
     # ── Main Mapping Pipeline ───────────────────────────────────
 
+    # -----------------------------------------------------------------------
+    # MODIFICA 1: Aggiunto parametro output_dir e logica di path join
+    # -----------------------------------------------------------------------
     def run_mapping(self,
                     aoi_path: str,
                     gaze_path: str,
                     video_res: tuple[int, int],
                     fps: float,
                     offset: float,
+                    output_dir: str | None = None,  # <--- Nuovo Parametro
                     progress_callback=None) -> tuple[str, int]:
-        """
-        End-to-end gaze → AOI mapping.
-
-        Parameters
-        ----------
-        aoi_path : str
-            Path to the AOI CSV produced by the Region module.
-        gaze_path : str
-            Path to the Tobii .gz gaze-data file.
-        video_res : (width, height)
-            Video resolution in pixels.
-        fps : float
-            Frame rate of the scene video.
-        offset : float
-            Sync offset in seconds (negative = gaze starts after video).
-        progress_callback : callable(message: str) | None
-            Optional UI feedback hook (called from worker thread).
-
-        Returns
-        -------
-        out_path : str
-            Path of the written _MAPPED.csv file.
-        total_rows : int
-            Number of gaze samples written.
-        """
+        
         self._cancel_flag = False
         W, H = video_res
 
@@ -142,32 +122,25 @@ class GazeLogic:
         if progress_callback:
             progress_callback(f"AOI indexed ({len(aoi_lookup)} frames). Streaming gaze…")
 
-        # 2. Stream gaze data
+        # 2. Stream gaze data (RESTO DEL BLOCCO RIMANE UGUALE FINO AL SALVATAGGIO)
         output_rows: list[dict] = []
 
         with gzip.open(gaze_path, 'rt', encoding='utf-8') as f:
             for line in f:
-                if self._cancel_flag:
-                    raise InterruptedError("Mapping cancelled by user.")
-
+                if self._cancel_flag: raise InterruptedError("Mapping cancelled by user.")
                 try:
                     gaze_pkg = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
+                except json.JSONDecodeError: continue
 
-                if 'data' not in gaze_pkg or 'gaze2d' not in gaze_pkg['data']:
-                    continue
+                if 'data' not in gaze_pkg or 'gaze2d' not in gaze_pkg['data']: continue
 
                 ts = gaze_pkg.get('timestamp', 0)
                 g2d = gaze_pkg['data']['gaze2d']
-                if not g2d:
-                    continue
+                if not g2d: continue
 
                 gx, gy = g2d[0], g2d[1]
-
                 frame_idx = self.timestamp_to_frame(ts, offset, fps)
-                if frame_idx < 0:
-                    continue
+                if frame_idx < 0: continue
 
                 px, py = self.normalised_to_pixel(gx, gy, W, H)
 
@@ -176,13 +149,9 @@ class GazeLogic:
                 best = self.calculate_hit(px, py, active_aois, id_col_name)
 
                 if best:
-                    hit_role = best['role']
-                    hit_aoi  = best['aoi']
-                    hit_tid  = best['tid']
+                    hit_role, hit_aoi, hit_tid = best['role'], best['aoi'], best['tid']
                 else:
-                    hit_role = "None"
-                    hit_aoi  = "None"
-                    hit_tid  = -1
+                    hit_role, hit_aoi, hit_tid = "None", "None", -1
 
                 output_rows.append({
                     "Timestamp":    ts,
@@ -196,13 +165,20 @@ class GazeLogic:
                     "Raw_Gaze2D_Y": gy,
                 })
 
-        # 3. Write output
+        # 3. Write output (MODIFICATO)
         if progress_callback:
             progress_callback("Saving CSV…")
 
-        out_path = gaze_path.replace(".gz", "_MAPPED.csv")
-        if out_path == gaze_path:
-            out_path += "_mapped.csv"
+        base_name = os.path.basename(gaze_path).replace(".gz", "")
+        filename = f"{base_name}_MAPPED.csv"
+
+        # Se output_dir esiste, usalo. Altrimenti usa la cartella del file input.
+        if output_dir and os.path.exists(output_dir):
+            target_dir = output_dir
+        else:
+            target_dir = os.path.dirname(gaze_path)
+            
+        out_path = os.path.join(target_dir, filename)
 
         df_out = pd.DataFrame(output_rows)
         df_out.to_csv(out_path, index=False)
@@ -223,6 +199,7 @@ class GazeView:
         # UI variables
         self.aoi_path = tk.StringVar()
         self.gaze_path = tk.StringVar()
+        self.output_dir = tk.StringVar()
 
         self.video_res_w = tk.IntVar(value=1920)
         self.video_res_h = tk.IntVar(value=1080)
@@ -236,7 +213,9 @@ class GazeView:
             self.aoi_path.set(self.context.aoi_csv_path)
         if hasattr(self.context, 'gaze_data_path') and self.context.gaze_data_path:
             self.gaze_path.set(self.context.gaze_data_path)
-
+        if hasattr(self.context, 'output_dir') and self.context.output_dir:
+            self.output_dir.set(self.context.output_dir)
+            
     # ── UI Construction ─────────────────────────────────────────
 
     def _build_ui(self):
@@ -256,6 +235,7 @@ class GazeView:
 
         self._add_file_picker(lf_files, "AOI File (.csv):", self.aoi_path, "*.csv")
         self._add_file_picker(lf_files, "Tobii Gaze Data (.gz):", self.gaze_path, "*.gz")
+        self._add_dir_picker(lf_files, "Output Folder:", self.output_dir)
 
         # 2. Sync parameters
         lf_params = tk.LabelFrame(main, text="2. Video & Sync Parameters",
@@ -311,6 +291,14 @@ class GazeView:
             side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         tk.Button(f, text="...", width=3,
                   command=lambda: self._browse(var, filetype)).pack(side=tk.LEFT)
+    
+    def _add_dir_picker(self, parent, label, var):
+        f = tk.Frame(parent)
+        f.pack(fill=tk.X, pady=2)
+        tk.Label(f, text=label, width=20, anchor="w").pack(side=tk.LEFT)
+        tk.Entry(f, textvariable=var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        tk.Button(f, text="...", width=3, 
+                  command=lambda: var.set(filedialog.askdirectory())).pack(side=tk.LEFT)
 
     def _browse(self, var, ft):
         path = filedialog.askopenfilename(filetypes=[("File", ft)])
@@ -340,6 +328,7 @@ class GazeView:
             "video_res": (self.video_res_w.get(), self.video_res_h.get()),
             "fps":       self.fps.get(),
             "offset":    self.sync_offset.get(),
+            "output_dir": self.output_dir.get(),
         }
 
         threading.Thread(target=self._thread_worker,
@@ -358,6 +347,7 @@ class GazeView:
                 video_res=params["video_res"],
                 fps=params["fps"],
                 offset=params["offset"],
+                output_dir=params["output_dir"],
                 progress_callback=self._on_progress,
             )
             self.context.mapped_csv_path = out_path

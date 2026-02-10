@@ -12,3 +12,5 @@ yolo26x-pose.pt
 *.pt
 *.pth
 .DS_Store
+*.mp4
+Prove/

@@ -243,39 +243,53 @@ class IdentityLogic:
             self._log_operation("Merge All By Role", {"merged_count": merge_count, "roles": roles_processed})
             return merge_count, roles_processed
 
-    def split_track(self, track_id_to_split: int, split_frame: int, keep_head: bool) -> Tuple[Optional[int], Any]:
+    def split_track(self, track_id: int, split_frame: int, keep_head: bool) -> Tuple[Optional[int], Any]:
         with self.lock:
-            track_data = self.tracks.get(track_id_to_split)
-            if not track_data: return None, "Track not found"
-
-            if split_frame <= track_data['frames'][0]: return None, "Cannot split at or before the first frame."
-            if split_frame > track_data['frames'][-1]: return None, "Split frame is beyond the end of the track."
-
+            if track_id not in self.tracks:
+                return None, "Track not found"
+            
+            data = self.tracks[track_id]
+            frames = data['frames']
+            boxes = data['boxes']
+            
+            # Find split index
             try:
-                split_index = next(i for i, f in enumerate(track_data['frames']) if f >= split_frame)
+                split_idx = next(i for i, f in enumerate(frames) if f >= split_frame)
             except StopIteration:
-                return None, "Split frame not found in track."
-
-            original_frames, new_frames = track_data['frames'][:split_index], track_data['frames'][split_index:]
-            original_boxes, new_boxes = track_data['boxes'][:split_index], track_data['boxes'][split_index:]
-
-            if not new_frames: return None, "Cannot split at the last frame."
-
-            new_track_id = max(self.tracks.keys()) + 1 if self.tracks else 1
+                return None, "Split frame out of bounds"
+            
+            if split_idx == 0:
+                return None, "Cannot split at start"
+            
+            # Generate new ID
+            max_id = max(self.tracks.keys()) if self.tracks else 0
+            new_id = max_id + 1
+            
+            head_frames = frames[:split_idx]
+            head_boxes = boxes[:split_idx]
+            tail_frames = frames[split_idx:]
+            tail_boxes = boxes[split_idx:]
             
             if keep_head:
-                self.tracks[track_id_to_split]['frames'], self.tracks[track_id_to_split]['boxes'] = original_frames, original_boxes
-                self.tracks[new_track_id] = {'frames': new_frames, 'boxes': new_boxes, 'role': 'Ignore', 'merged_from': [new_track_id]}
-                self.id_lineage[new_track_id] = new_track_id
-                created_len = len(new_frames)
+                # Original keeps head
+                self.tracks[track_id]['frames'] = head_frames
+                self.tracks[track_id]['boxes'] = head_boxes
+                
+                # New gets tail
+                self.tracks[new_id] = {'frames': tail_frames, 'boxes': tail_boxes, 'role': 'Ignore', 'merged_from': []}
+                self.id_lineage[new_id] = new_id
+                self._log_operation("Split Track", {"original": track_id, "new": new_id, "split_frame": split_frame, "kept": "head"})
+                return new_id, len(tail_frames)
             else:
-                self.tracks[track_id_to_split]['frames'], self.tracks[track_id_to_split]['boxes'] = new_frames, new_boxes
-                self.tracks[new_track_id] = {'frames': original_frames, 'boxes': original_boxes, 'role': 'Ignore', 'merged_from': [new_track_id]}
-                self.id_lineage[new_track_id] = new_track_id
-                created_len = len(original_frames)
-            
-            self._log_operation("Split Track", {"original_id": track_id_to_split, "new_id": new_track_id, "frame": split_frame, "keep_head": keep_head})
-            return new_track_id, created_len
+                # Original keeps tail
+                self.tracks[track_id]['frames'] = tail_frames
+                self.tracks[track_id]['boxes'] = tail_boxes
+                
+                # New gets head
+                self.tracks[new_id] = {'frames': head_frames, 'boxes': head_boxes, 'role': 'Ignore', 'merged_from': []}
+                self.id_lineage[new_id] = new_id
+                self._log_operation("Split Track", {"original": track_id, "new": new_id, "split_frame": split_frame, "kept": "tail"})
+                return new_id, len(head_frames)
 
     def auto_stitch(self, lookahead: int, time_gap: float, stitch_dist: float) -> int:
         with self.lock:
@@ -511,6 +525,7 @@ class IdentityView:
 
         self.tree.bind("<Button-3>", self.show_context_menu)
         self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
+        self.tree.bind("<Double-1>", self.on_tree_double_click)
         
         self.context_menu = tk.Menu(self.parent, tearoff=0)
         self.refresh_cast_list()
@@ -641,7 +656,7 @@ class IdentityView:
     # ------------------------------------------------------------------ #
     def _setup_hotkeys(self) -> None:
         root = self.parent.winfo_toplevel()
-        root.bind("<Space>", self._on_space)
+        root.bind("<space>", self._on_space)
         root.bind("<Left>", self._on_left)
         root.bind("<Right>", self._on_right)
         root.bind("<Shift-Left>", self._on_shift_left)
@@ -734,8 +749,8 @@ class IdentityView:
         self._start_autosave_loop()
 
     def _get_autosave_path(self) -> str:
-        if self.context and self.context.project_path:
-            return os.path.join(self.context.project_path, self.AUTOSAVE_FILENAME)
+        if self.context and self.context.project_root:
+            return os.path.join(self.context.project_root, self.AUTOSAVE_FILENAME)
         return self.AUTOSAVE_FILENAME
 
     def _check_for_autosave(self) -> None:
@@ -865,26 +880,32 @@ class IdentityView:
         self.refresh_tree()
         self.tree.selection_set(str(master))
 
-    def split_track_at_current_frame(self) -> None:
-        """Splits a selected track into two at the current video frame."""
-        selection = self.tree.selection()
-        first = next(iter(selection), None)
-        if first is None:
-            messagebox.showwarning("Warning", "No track selected.")
-            return
-        track_id_to_split = int(first)
+    def split_track_at_current_frame(self, track_id: Optional[int] = None, override_frame: Optional[int] = None) -> None:
+        """Splits a specific track into two at the specified frame."""
+        if track_id is not None:
+            track_id_to_split = track_id
+        else:
+            selection = self.tree.selection()
+            first = next(iter(selection), None)
+            if first is None:
+                messagebox.showwarning("Warning", "No track selected.")
+                return
+            track_id_to_split = int(first)
 
-        if len(selection) > 1:
-            messagebox.showwarning("Warning", "Select only one track to split.")
-            return
+            if len(selection) > 1:
+                messagebox.showwarning("Warning", "Select only one track to split.")
+                return
 
-        split_frame = self.current_frame
+        split_frame = override_frame if override_frame is not None else self.current_frame
         
         track_data = self.logic.tracks.get(track_id_to_split)
         if not track_data: return
 
         if split_frame <= track_data['frames'][0] or split_frame > track_data['frames'][-1]:
-            messagebox.showinfo("Info", "Cannot split at the very start or after the end of a track.")
+            messagebox.showinfo("Split Error", 
+                                f"Cannot split at frame {split_frame}.\n"
+                                f"Track range: {track_data['frames'][0]} - {track_data['frames'][-1]}.\n"
+                                "You must be strictly inside the track (after the first frame).")
             return
 
         try:
@@ -1131,24 +1152,92 @@ class IdentityView:
     def show_context_menu(self, e: tk.Event) -> None:
         i = self.tree.identify_row(e.y)
         if i:
-            if i not in self.tree.selection(): self.tree.selection_set(i)
+            # 1. Seleziona la riga se non lo è (questo potrebbe causare un salto video, che è corretto per feedback)
+            if i not in self.tree.selection(): 
+                self.tree.selection_set(i)
+                # Forziamo l'aggiornamento eventi per assicurarci che on_tree_select sia scattato
+                self.parent.update_idletasks()
+
+            # 2. Cattura il frame e l'ID DOPO l'eventuale selezione/salto
+            frozen_frame_for_split = self.current_frame
+            tid = int(i)
+
+            # 3. Costruisci il menu
             self.context_menu.delete(0, tk.END)
-            for p in self.cast: self.context_menu.add_command(label=f"Assign to {p}", command=lambda n=p: self.assign_role_to_selection(n))
+            for p in self.cast: 
+                self.context_menu.add_command(label=f"Assign to {p}", command=lambda n=p: self.assign_role_to_selection(n))
+            
             self.context_menu.add_separator()
             self.context_menu.add_command(label="Remove Assignment", command=lambda: self.assign_role_to_selection("Ignore"))
             self.context_menu.add_separator()
             self.context_menu.add_command(label="🔗 Merge Selected", command=self.manual_merge)
-            self.context_menu.add_command(label="✂️ Split at Current Frame", command=self.split_track_at_current_frame)
+            
+            # 5. PUNTO CRITICO: Passiamo il frame congelato direttamente alla funzione
+            # Check bounds to prevent errors
+            can_split = False
+            try:
+                if tid in self.logic.tracks:
+                    t_frames = self.logic.tracks[tid]['frames']
+                    # Logic requires: split_frame > first_frame AND split_frame <= last_frame
+                    if t_frames and (frozen_frame_for_split > t_frames[0]) and (frozen_frame_for_split <= t_frames[-1]):
+                        can_split = True
+            except Exception:
+                pass
+
+            if can_split:
+                self.context_menu.add_command(
+                    label=f"✂️ Split at Frame {frozen_frame_for_split}", 
+                    command=lambda: self.split_track_at_current_frame(track_id=tid, override_frame=frozen_frame_for_split)
+                )
+            else:
+                self.context_menu.add_command(
+                    label=f"✂️ Split (Frame {frozen_frame_for_split} out of bounds)", 
+                    state="disabled"
+                )
+            
             self.context_menu.post(e.x_root, e.y_root)
 
     def assign_role_to_selection(self, role: str) -> None:
-        selected_ids = [int(i) for i in self.tree.selection()]
-        self.logic.assign_role_to_ids(selected_ids, role)
-        self.refresh_tree(); self.show_frame()
+        selected_ids = [str(i) for i in self.tree.selection()]
+        self.logic.assign_role_to_ids([int(i) for i in selected_ids], role)
+        self.refresh_tree()
+        # Restore selection and focus after tree rebuild
+        existing = [iid for iid in selected_ids if self.tree.exists(iid)]
+        if existing:
+            self.tree.selection_set(existing)
+            self.tree.focus(existing[0])
+            self.tree.see(existing[0])
+        self.show_frame()
 
     def on_tree_select(self, e: tk.Event) -> None:
+        # Comportamento normale (Click sinistro / Frecce):
+        # Salta all'inizio della traccia per rapida identificazione
         s = self.tree.selection()
-        if s: self.current_frame = self.logic.tracks[int(s[0])]['frames'][0]; self.slider.set(self.current_frame); self.show_frame()
+        if s: 
+            try:
+                track_id = int(s[0])
+                track_data = self.logic.tracks[track_id]
+                frames = track_data['frames']
+
+                # FIX: Se siamo già dentro la traccia, non saltare all'inizio.
+                if frames and (frames[0] <= self.current_frame <= frames[-1]):
+                    return
+
+                self.current_frame = frames[0]
+                self.slider.set(self.current_frame)
+                self.show_frame()
+            except (ValueError, IndexError, KeyError):
+                pass
+
+    def on_tree_double_click(self, e: tk.Event) -> None:
+        # Questa funzione ripristina il comportamento di "Salto al frame" 
+        # ma solo quando lo richiedi esplicitamente col doppio click.
+        s = self.tree.selection()
+        if s: 
+            start_frame = self.logic.tracks[int(s[0])]['frames'][0]
+            self.current_frame = start_frame
+            self.slider.set(self.current_frame)
+            self.show_frame()
 
     def on_seek(self, v: str) -> None:
         self.current_frame = int(float(v)); self.show_frame()

@@ -48,7 +48,12 @@ class StatsLogic:
         # Carica Gaze (MAPPED)
         try:
             df_gaze = pd.read_csv(mapped_path)
-            # Assicuriamoci che i timestamp siano ordinati per usare searchsorted (molto più veloce)
+            # FIX: Verifica immediata delle colonne necessarie
+            required_cols = ['Hit_Role', 'Hit_AOI', 'Timestamp']
+            missing = [c for c in required_cols if c not in df_gaze.columns]
+            if missing:
+                raise ValueError(f"Il file CSV manca delle colonne: {missing}. Verifica lo step di Mapping o il separatore CSV.")
+
             df_gaze = df_gaze.sort_values('Timestamp').reset_index(drop=True)
             
             # --- FIX PYLANCE 2: Conversione esplicita a numpy float64 ---
@@ -299,7 +304,9 @@ class GazeStatsView:
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-                self.parent.after(0, lambda: self._show_error(str(e)))
+                # FIX: Salviamo il messaggio in una variabile locale prima di passarlo alla lambda
+                error_message = str(e)
+                self.parent.after(0, lambda: self._show_error(error_message))
 
         threading.Thread(target=worker, daemon=True).start()
 

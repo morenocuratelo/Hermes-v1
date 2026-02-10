@@ -441,7 +441,8 @@ class YoloView:
         f = filedialog.askopenfilename(filetypes=[("Video", ft)])
         if f: 
             var.set(f)
-            self.context.update_video(f) 
+            # Import the video into the active participant's input folder
+            self.context.import_file_for_participant(self.context.current_participant, f)
             self._suggest_output_name(f)
 
     def browse_save(self, var, ft):
@@ -543,8 +544,9 @@ class YoloView:
                 self.parent.after(0, lambda: messagebox.showinfo("Finished", "Analysis complete."))
             
         except Exception as e:
-            self._log_message(f"❌ CRITICAL ERROR: {str(e)}\n{traceback.format_exc()}")
-            self.parent.after(0, lambda: messagebox.showerror("Error", f"Error during analysis:\n{str(e)}"))
+            err_msg = str(e)  # Capture before 'e' goes out of scope
+            self._log_message(f"❌ CRITICAL ERROR: {err_msg}\n{traceback.format_exc()}")
+            self.parent.after(0, lambda: messagebox.showerror("Error", f"Error during analysis:\n{err_msg}"))
             
         finally:
             self.is_running = False
