@@ -1,17 +1,19 @@
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox, scrolledtext
+import threading
+import os
+import sys
+
+# Logic Imports
 import torch
 import cv2
 import json
 import gzip
-import os
-import threading
-import sys
 import random
 import numpy as np
 import requests
 import csv
-from ultralytics import YOLO # type: ignore
+from ultralytics import YOLO  # type: ignore
 
 # --- RESEARCH PARAMETERS & HEURISTICS (CONSTANTS) ---
 # Globally exposed for reproducibility and tuning. Here are initialised, but can be adjusted by the user via the UI sliders.
@@ -25,21 +27,254 @@ RANDOM_SEED = 42
 ULTRALYTICS_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/"
 # Sebbene questi valori siano stati scelti come default basati sulla letteratura (COCO benchmarks), il nostro strumento espone esplicitamente questi parametri all'utente tramite GUI, permettendo una regolazione fine (fine-tuning) specifica per le condizioni di illuminazione e densità della scena analizzata, superando i limiti di un approccio 'one-size-fits-all'.
 
-def set_determinism(seed=42):
+
+# --- BUSINESS LOGIC LAYER ---
+class PoseEstimatorLogic:
     """
-    Sets the seed to ensure scientific reproducibility of results.
-    Locks CUDNN optimization heuristics that could introduce
-    hardware non-determinism.
+    Encapsulates all computational logic for Human Pose Estimation.
+    Strictly separated from Tkinter/GUI.
     """
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-        # Determinismo assoluto a scapito di leggera performance
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+    def __init__(self):
+        pass
+
+    def set_determinism(self, seed=42):
+        """
+        Sets the seed to ensure scientific reproducibility of results.
+        Locks CUDNN optimization heuristics that could introduce
+        hardware non-determinism.
+        """
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
+            # Determinismo assoluto a scapito di leggera performance
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+
+    def download_model(self, model_name, dest_path, on_progress=None, on_log=None):
+        if on_log: on_log(f"📥 Downloading model: {model_name}...")
+        url = ULTRALYTICS_URL + model_name
+        try:
+            response = requests.get(url, stream=True, timeout=10)
+            response.raise_for_status()
+            total_size = int(response.headers.get('content-length', 0))
+            
+            with open(dest_path, 'wb') as f:
+                downloaded = 0
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0 and on_progress:
+                            on_progress(downloaded, total_size, stage="download")
+            if on_log: on_log("✅ Download complete.")
+            return True
+        except Exception as e:
+            if on_log: on_log(f"❌ Download error: {e}")
+            if os.path.exists(dest_path): os.remove(dest_path)
+            return False
+
+    def generate_tracker_config(self, params, filename="custom_tracker.yaml"):
+        lines = [
+            f"tracker_type: {params.get('tracker_type', 'botsort')}",
+            f"track_high_thresh: {params.get('conf', 0.5)}",
+            f"track_low_thresh: {params.get('low_thresh', 0.1)}",
+            f"new_track_thresh: {params.get('conf', 0.5)}",
+            f"track_buffer: {params.get('buffer', 30)}",
+            f"match_thresh: {params.get('match', 0.8)}"
+        ]
+        
+        tracker_name = params.get('tracker_type', 'botsort')
+        if tracker_name in ('botsort', 'bytetrack'):
+            lines.append("fuse_score: True")
+
+        if tracker_name == 'botsort':
+            lines.append("gmc_method: sparseOptFlow")
+            lines.append(f"proximity_thresh: {params.get('prox', 0.5)}")
+            lines.append(f"appearance_thresh: {params.get('app', 0.25)}")
+            
+            reid_weights = params.get('reid_weights')
+            if params.get('with_reid', False) and reid_weights:
+                lines.append("with_reid: True")
+                lines.append(f"model: {reid_weights}")
+            elif params.get('with_reid', False):
+                lines.append("with_reid: True")
+                lines.append("model: osnet_x0_25_msmt17.pt")
+            else:
+                lines.append("with_reid: False")
+            
+        with open(filename, 'w') as f:
+            f.write("\n".join(lines))
+        return filename
+
+    def export_to_csv_flat(self, json_gz_path, on_log=None):
+        try:
+            if on_log: on_log("Converting output to Flattened CSV...")
+            csv_path = json_gz_path.replace(".json.gz", ".csv")
+            
+            kp_names = [
+                "Nose", "L_Eye", "R_Eye", "L_Ear", "R_Ear", 
+                "L_Shoulder", "R_Shoulder", "L_Elbow", "R_Elbow", 
+                "L_Wrist", "R_Wrist", "L_Hip", "R_Hip", 
+                "L_Knee", "R_Knee", "L_Ankle", "R_Ankle"
+            ]
+            
+            header = ["Frame", "Timestamp", "TrackID", "Conf", "Box_X1", "Box_Y1", "Box_X2", "Box_Y2"]
+            for kp in kp_names:
+                header.extend([f"{kp}_X", f"{kp}_Y", f"{kp}_C"])
+
+            with open(csv_path, mode='w', newline='') as f_csv:
+                writer = csv.writer(f_csv)
+                writer.writerow(header)
+                
+                with gzip.open(json_gz_path, 'rt', encoding='utf-8') as f_json:
+                    for line in f_json:
+                        frame = json.loads(line)
+                        f_idx = frame['f_idx']
+                        ts = frame['ts']
+                        
+                        for det in frame.get('det', []):
+                            row = [f_idx, ts, det.get('track_id', -1), det.get('conf', 0)]
+                            b = det.get('box', {})
+                            row.extend([b.get('x1',0), b.get('y1',0), b.get('x2',0), b.get('y2',0)])
+                            kps = det.get('keypoints', [])
+                            if not kps:
+                                row.extend([0] * (17 * 3))
+                            else:
+                                for point in kps:
+                                    row.extend(point) 
+                                    if len(point) < 3: row.append(0) 
+                            writer.writerow(row)
+                            
+            if on_log: on_log(f"✅ CSV Export complete: {csv_path}")
+            return True
+        except Exception as e:
+            if on_log: on_log(f"⚠️ CSV Export error: {e}")
+            return False
+
+    def run_analysis(self, config, on_progress=None, on_log=None):
+        """
+        Main execution method.
+        config: dict containing paths, model names, and tracker parameters.
+        """
+        video_file = config['video_path']
+        out_file = config['output_path']
+        model_name = config['model_name']
+        tracker_params = config['tracker_params']
+        models_dir = config['models_dir']
+        device = config['device']
+
+        if on_log: on_log(f"--- Analysis Started ---")
+        
+        # 1. ReID Model Check
+        reid_path = None
+        if tracker_params.get('with_reid') and tracker_params.get('tracker_type') == 'botsort':
+            reid_name = "osnet_x0_25_msmt17.pt"
+            reid_path = os.path.join(models_dir, reid_name)
+            
+            if not os.path.exists(reid_path):
+                if on_log: on_log(f"Missing ReID model, starting download: {reid_name}")
+                if not self.download_model(reid_name, reid_path, on_progress, on_log):
+                    if on_log: on_log("⚠️ ReID download failed. Disabling ReID.")
+                    tracker_params['with_reid'] = False
+                    reid_path = None
+            
+            if reid_path: 
+                reid_path = reid_path.replace("\\", "/")
+                tracker_params['reid_weights'] = reid_path
+
+        # 2. Generate Tracker Config
+        tracker_config_file = self.generate_tracker_config(tracker_params, f"custom_{tracker_params['tracker_type']}.yaml")
+        if on_log: on_log(f"✅ Tracker configuration generated: {tracker_config_file}")
+
+        # 3. Determinism
+        if on_log: on_log(f"Reproducibility seed: {RANDOM_SEED}")
+        self.set_determinism(RANDOM_SEED)
+
+        # 4. YOLO Model Check
+        model_path = os.path.join(models_dir, model_name)
+        if not os.path.exists(model_path):
+            if on_log: on_log(f"Missing model, starting download: {model_name}")
+            if not self.download_model(model_name, model_path, on_progress, on_log):
+                raise Exception("Unable to download model.")
+        
+        # 5. Load Model
+        if on_log: on_log("Allocating YOLO weights to VRAM...")
+        model = YOLO(model_path)
+
+        # 6. Video Metadata
+        cap = cv2.VideoCapture(video_file)
+        if not cap.isOpened():
+            raise IOError(f"Unable to open video: {video_file}")
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        cap.release()
+
+        if on_log: on_log(f"Starting tracking (Conf: {tracker_params['conf']}, IoU: {tracker_params['iou']})...")
+
+        # 7. Inference Loop
+        is_tracker_enabled = tracker_params['tracker_type'] != "none"
+        
+        yolo_args = {
+            "source": video_file,
+            "stream": True,
+            "verbose": False,
+            "conf": tracker_params['conf'],
+            "iou": tracker_params['iou'],
+            "device": 0 if device == "cuda" else "cpu"
+        }
+        
+        if is_tracker_enabled:
+            yolo_args["persist"] = True
+            yolo_args["tracker"] = tracker_config_file
+            results = model.track(**yolo_args)
+        else:
+            if on_log: on_log("Starting analysis WITHOUT tracker (detection only)...")
+            results = model.predict(**yolo_args)
+
+        with gzip.open(out_file, 'wt', encoding='utf-8') as f:
+            for i, result in enumerate(results):
+                # Normalize to numpy (handles CPU/GPU and Tensor/ndarray differences)
+                result = result.cpu().numpy()
+
+                boxes = result.boxes.xyxy if result.boxes else np.array([])
+                ids = result.boxes.id if result.boxes and result.boxes.id is not None else np.array([])
+                confs = result.boxes.conf if result.boxes else np.array([])
+                keypoints = result.keypoints.data if result.keypoints else np.array([])
+
+                det_list = []
+                for j in range(len(boxes)):
+                    track_id = int(ids[j]) if len(ids) > 0 else -1
+                    b = boxes[j].tolist()
+                    det_data = {
+                        "track_id": track_id,
+                        "box": {"x1": b[0], "y1": b[1], "x2": b[2], "y2": b[3]},
+                        "conf": float(confs[j]),
+                        "keypoints": keypoints[j].tolist() if len(keypoints) > 0 else []
+                    }
+                    det_list.append(det_data)
+
+                frame_data = {
+                    "f_idx": i,
+                    "ts": round(i / fps, 4) if fps > 0 else 0,
+                    "det": det_list
+                }
+                f.write(json.dumps(frame_data) + "\n")
+
+                if on_progress and i % 10 == 0:
+                    on_progress(i, total_frames, stage="inference")
+                
+                if i % 100 == 0 and on_log:
+                    on_log(f"Processed Frame: {i}/{total_frames} | Tracked objects: {len(det_list)}")
+
+        if on_log: on_log(f"✅ YOLO analysis complete. JSON output saved.")
+        
+        # 8. CSV Export
+        self.export_to_csv_flat(out_file, on_log)
+        
+        return True
 
 # --- REDIRECT PRINT TO GUI ---
 class TextRedirector(object):
@@ -62,6 +297,7 @@ class TextRedirector(object):
     def flush(self):
         pass
 
+# --- PRESENTATION LAYER ---
 # --- MAIN VIEW CLASS ---
 class YoloView:
     def __init__(self, parent, context):
@@ -232,317 +468,64 @@ class YoloView:
         t = threading.Thread(target=self.run_yolo_process)
         t.start()
 
-    def _download_model_manual(self, model_name, dest_path):
-        print(f"📥 Downloading model: {model_name}...")
-        # URL ufficiali Ultralytics Assets (es. v8.3.0)
-        url = ULTRALYTICS_URL + model_name
-        try:
-            response = requests.get(url, stream=True, timeout=10)
-            response.raise_for_status()
-            total_size = int(response.headers.get('content-length', 0))
-            
-            with open(dest_path, 'wb') as f:
-                downloaded = 0
-                for chunk in response.iter_content(chunk_size=8192): #Nei sistemi operativi moderni (Windows, Linux, macOS), la gestione della memoria avviene tramite "pagine" (paging). La dimensione standard di una pagina è spesso 4 KB (4096 byte) o 8 KB (8192 byte). Leggere o scrivere 8192 byte alla volta significa riempire esattamente due pagine standard (o una pagina da 8 KB), massimizzando l'efficienza del trasferimento dati tra RAM e disco.
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if total_size > 0:
-                            perc = int((downloaded / total_size) * 50)
-                            self.parent.after(0, lambda v=perc: self.progress.config(value=v))
-            print("✅ Download complete.")
-            return True
-        except Exception as e:
-            print(f"❌ Download error: {e}")
-            if os.path.exists(dest_path): os.remove(dest_path)
-            return False
-
-    def _generate_tracker_config(self, tracker_name, reid_weights=None):
-        filename = f"custom_{tracker_name}.yaml"
-        conf = self.conf_threshold.get()
-        match = self.match_threshold.get()
-        buf = self.track_buffer.get()
+    def _update_progress(self, current, total, stage="inference"):
+        """Thread-safe UI update callback"""
+        if stage == "download":
+            # Il download occupa il primo 10% della barra (0-10%)
+            # Se total è 0 (non si sa la dimensione), non fare nulla per evitare divisione per zero
+            if total > 0:
+                perc = (current / total) * 10 
+                self.parent.after(0, lambda: self.progress.config(value=perc, maximum=100))
         
-        # Parametri Avanzati
-        low_thresh = self.track_low_thresh.get()
-        prox = self.proximity_thresh.get()
-        app = self.appearance_thresh.get()
-        reid = self.with_reid.get()
-        
-        lines = [
-            f"tracker_type: {tracker_name}",
-            f"track_high_thresh: {conf}",
-            f"track_low_thresh: {low_thresh}",
-            f"new_track_thresh: {conf}",
-            f"track_buffer: {buf}",
-            f"match_thresh: {match}"
-        ]
-        
-        if tracker_name in ('botsort', 'bytetrack'):
-            lines.append("fuse_score: True")
+        elif stage == "inference":
+            # L'inferenza occupa il restante 90% (da 10% a 100%)
+            if total > 0:
+                # Calcoliamo la percentuale relativa all'inferenza (0-100)
+                relative_perc = (current / total) * 90
+                # Aggiungiamo il 10% del download
+                final_val = 10 + relative_perc
+                self.parent.after(0, lambda: self.progress.config(value=final_val, maximum=100))
 
-        if tracker_name == 'botsort':
-            lines.append("gmc_method: sparseOptFlow")
-            lines.append(f"proximity_thresh: {prox}")
-            lines.append(f"appearance_thresh: {app}")
-            
-            if reid and reid_weights:
-                lines.append("with_reid: True")
-                lines.append(f"model: {reid_weights}")
-            elif reid:
-                # Fallback legacy (assumes file in CWD)
-                lines.append("with_reid: True")
-                lines.append("model: osnet_x0_25_msmt17.pt")
-            else:
-                lines.append("with_reid: False")
-            
-        with open(filename, 'w') as f:
-            f.write("\n".join(lines))
-        return filename
-
-    # --- NUOVO METODO HELPER PER CSV (LONG FORMAT) ---
-    def _export_to_csv_flat(self, json_gz_path):
-        """
-        Converts hierarchical JSON to 'flat' CSV (Long Format).
-        Each row = One person in a frame. Strict for statistical analysis (Tidy Data).
-        """
-        try:
-            print("Converting output to Flattened CSV...")
-            csv_path = json_gz_path.replace(".json.gz", ".csv")
-            
-            # 1. Definizione Header (59 Colonne per modello Pose standard)
-            # COCO Keypoints Order: 0:Nose, 1:L_Eye, 2:R_Eye, 3:L_Ear, 4:R_Ear...
-            kp_names = [
-                "Nose", "L_Eye", "R_Eye", "L_Ear", "R_Ear", 
-                "L_Shoulder", "R_Shoulder", "L_Elbow", "R_Elbow", 
-                "L_Wrist", "R_Wrist", "L_Hip", "R_Hip", 
-                "L_Knee", "R_Knee", "L_Ankle", "R_Ankle"
-            ]
-            
-            header = ["Frame", "Timestamp", "TrackID", "Conf", "Box_X1", "Box_Y1", "Box_X2", "Box_Y2"]
-            for kp in kp_names:
-                # Per ogni punto salviamo X, Y e Confidenza (C)
-                header.extend([f"{kp}_X", f"{kp}_Y", f"{kp}_C"])
-
-            # 2. Scrittura Stream
-            with open(csv_path, mode='w', newline='') as f_csv:
-                writer = csv.writer(f_csv)
-                writer.writerow(header)
-                
-                with gzip.open(json_gz_path, 'rt', encoding='utf-8') as f_json:
-                    for line in f_json:
-                        frame = json.loads(line)
-                        f_idx = frame['f_idx']
-                        ts = frame['ts']
-                        
-                        for det in frame.get('det', []):
-                            # Dati Base
-                            row = [
-                                f_idx, 
-                                ts, 
-                                det.get('track_id', -1), 
-                                det.get('conf', 0)
-                            ]
-                            
-                            # Box
-                            b = det.get('box', {})
-                            row.extend([b.get('x1',0), b.get('y1',0), b.get('x2',0), b.get('y2',0)])
-                            
-                            # Keypoints (Appiattimento 17 punti x 3 valori)
-                            kps = det.get('keypoints', [])
-                            # kps è una lista di liste [[x,y,c], [x,y,c]...]
-                            
-                            if not kps:
-                                # Se manca lo scheletro, riempiamo di zeri per mantenere l'allineamento colonne
-                                row.extend([0] * (17 * 3))
-                            else:
-                                for point in kps:
-                                    # Aggiunge X, Y. Se manca C (confidence), mette 0
-                                    row.extend(point) 
-                                    if len(point) < 3: row.append(0) 
-                            
-                            writer.writerow(row)
-                            
-            print(f"✅ CSV Export complete: {csv_path}")
-            return True
-        except Exception as e:
-            print(f"⚠️ CSV Export error: {e}")
-            return False
-    # --------------------------------------
+    def _log_message(self, msg):
+        """Thread-safe Log callback"""
+        print(msg) # This goes to TextRedirector -> ScrolledText
 
     def run_yolo_process(self):
-        video_file = self.video_path.get()
-        out_file = self.output_path.get()
-        model_name = self.model_name.get()
-        
-        conf_value = self.conf_threshold.get()
-        iou_value = self.iou_threshold.get()
+        # Collect parameters from UI
+        config = {
+            "video_path": self.video_path.get(),
+            "output_path": self.output_path.get(),
+            "model_name": self.model_name.get(),
+            "models_dir": self.context.paths["models"],
+            "device": self.context.device,
+            "tracker_params": {
+                "tracker_type": self.tracker_type.get(),
+                "conf": self.conf_threshold.get(),
+                "iou": self.iou_threshold.get(),
+                "match": self.match_threshold.get(),
+                "buffer": self.track_buffer.get(),
+                "low_thresh": self.track_low_thresh.get(),
+                "prox": self.proximity_thresh.get(),
+                "app": self.appearance_thresh.get(),
+                "with_reid": self.with_reid.get()
+            }
+        }
         
         try:
-            print(f"--- Analysis Started ---")
+            logic = PoseEstimatorLogic()
+            success = logic.run_analysis(
+                config, 
+                on_progress=self._update_progress,
+                on_log=self._log_message
+            )
             
-            # 0. GESTIONE REID (Download & Path Assoluto)
-            reid_path = None
-            if self.with_reid.get() and self.tracker_type.get() == 'botsort':
-                reid_name = "osnet_x0_25_msmt17.pt"
-                reid_path = os.path.join(self.context.paths["models"], reid_name)
-                
-                if not os.path.exists(reid_path):
-                    print(f"Missing ReID model, starting download: {reid_name}")
-                    if not self._download_model_manual(reid_name, reid_path):
-                        print("⚠️ ReID download failed. Disabling ReID.")
-                        self.with_reid.set(False)
-                        reid_path = None
-                
-                if reid_path: reid_path = reid_path.replace("\\", "/") # Fix YAML Windows paths
-
-            tracker_config = self._generate_tracker_config(self.tracker_type.get(), reid_path)
-
-            # Controllo esistenza file configurazione tracker
-            if not os.path.exists(tracker_config):
-                print(f"⚠️ WARNING: '{tracker_config}' not found in working directory.")
-                print("   YOLO will use default parameters (may not be optimized for Human Pose).")
-            else:
-                print(f"✅ Tracker configuration generated: {tracker_config}")
-
-            print(f"Reproducibility seed: {RANDOM_SEED}")
-            set_determinism(RANDOM_SEED)
-
-            # 1. GESTIONE MODELLO
-            model_path = os.path.join(self.context.paths["models"], model_name)
-            if not os.path.exists(model_path):
-                print(f"Missing model, starting download: {model_name}")
-                success = self._download_model_manual(model_name, model_path)
-                if not success:
-                    raise Exception("Unable to download model.")
-            else:
-                self.progress.config(value=50)
-
-            # 2. CARICAMENTO
-            print("Allocating YOLO weights to VRAM...")
-            model = YOLO(model_path) 
-            
-            # 3. PREPARAZIONE METADATI
-            cap = cv2.VideoCapture(video_file)
-            if not cap.isOpened():
-                raise IOError(f"Unable to open video: {video_file}")
-                
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            cap.release()
-            
-            self.parent.after(0, lambda: self.progress.configure(maximum=total_frames + total_frames)) 
-            
-            print(f"Starting tracking {tracker_config} (Conf: {conf_value}, IoU: {iou_value})...")
-            
-            # ---------------------------------------------------------
-            # [SECTION: COMPUTER VISION PIPELINE]
-            # Questa sezione incapsula la logica di inferenza.
-            # ---------------------------------------------------------
-            # 1. GENERATORE STREAMING:
-            #    L'argomento stream=True crea un iteratore lazy. I frame 
-            #    vengono decodificati e passati alla GPU uno alla volta, 
-            #    prevenendo overflow di memoria su video lunghi.
-            #
-            # 2. BYTETRACK ASSOCIATION (persist=True):
-            #    A differenza di DeepSORT, ByteTrack associa detection ad 
-            #    bassa confidenza se coerenti con la traiettoria del filtro 
-            #    di Kalman. Questo riduce la frammentazione degli ID in 
-            #    caso di occlusioni parziali.
-            # ---------------------------------------------------------
-            
-            # Verifica se il tracker è attivo
-            is_tracker_enabled = self.tracker_type.get() != "none"
-            
-            if is_tracker_enabled:
-                results = model.track(
-                    source=video_file,
-                    stream=True,
-                    persist=True,
-                    tracker=tracker_config,
-                    verbose=False,
-                    conf=conf_value,
-                    iou=iou_value,
-                    device=0 if self.context.device == "cuda" else "cpu"
-                )
-            else:
-                print("Starting analysis WITHOUT tracker (detection only)...")
-                results = model.predict(
-                    source=video_file,
-                    stream=True,
-                    verbose=False,
-                    conf=conf_value,
-                    iou=iou_value,
-                    device=0 if self.context.device == "cuda" else "cpu"
-                )
-            
-            with gzip.open(out_file, 'wt', encoding='utf-8') as f:
-                for i, result in enumerate(results):
-                    # -----------------------------------------------------
-                    # [DATA EXTRACTION LAYER]
-                    # Estrazione diretta dai tensori CUDA per evitare overhead.
-                    # -----------------------------------------------------
-                    # result.boxes.xywh: Coordinate normalizzate centro-dimensione
-                    # result.boxes.id: Identificativo univoco tracciamento
-                    # result.keypoints: Coordinate scheletriche (Pose estimation)
-                    
-                    # Spostamento tensori da VRAM a RAM
-                    boxes = result.boxes.xyxy.cpu().numpy() if result.boxes else np.array([])  # type: ignore
-                    ids = result.boxes.id.cpu().numpy() if result.boxes and result.boxes.id is not None else np.array([])  # type: ignore
-                    confs = result.boxes.conf.cpu().numpy() if result.boxes else np.array([])  # type: ignore
-                    
-                    # Keypoints: [N, 17, 3] -> (x, y, visibility)
-                    keypoints = result.keypoints.data.cpu().numpy() if result.keypoints else np.array([])  # type: ignore
-
-                    det_list = []
-                    # Iterazione sulle detection del singolo frame
-                    for j in range(len(boxes)):
-                        track_id = int(ids[j]) if len(ids) > 0 else -1
-                        
-                        # Format box for hermes_entity (x1, y1, x2, y2)
-                        b = boxes[j].tolist()
-                        
-                        # Serializzazione ottimizzata
-                        det_data = {
-                            "track_id": track_id,
-                            "box": {"x1": b[0], "y1": b[1], "x2": b[2], "y2": b[3]},
-                            "conf": float(confs[j]),
-                            "keypoints": keypoints[j].tolist() if len(keypoints) > 0 else []
-                        }
-                        det_list.append(det_data)
-
-                    # Struttura dati finale per il frame
-                    frame_data = {
-                        "f_idx": i,
-                        "ts": round(i / fps, 4) if fps > 0 else 0, # Timestamp assoluto 4 cifre decimali
-                        "det": det_list
-                    }
-                    
-                    # Scrittura riga JSONL (line-delimited)
-                    f.write(json.dumps(frame_data) + "\n")
-                    
-                    # -----------------------------------------------------
-                    # UI UPDATE (Non-Blocking)
-                    # -----------------------------------------------------
-                    if i % 10 == 0:
-                        current_val = total_frames + i 
-                        self.parent.after(0, lambda v=current_val: self.progress.config(value=v))
-                        if i % 100 == 0:
-                            print(f"Processed Frame: {i}/{total_frames} | Tracked objects: {len(det_list)}")
-
-            print(f"✅ YOLO analysis complete. JSON output saved.")
-            
-            # Avvia conversione Matlab immediata
-            self._export_to_csv_flat(out_file)
-            
-            self.context.pose_data_path = out_file
-            messagebox.showinfo("Finished", "Analysis complete.")
+            if success:
+                self.context.pose_data_path = config["output_path"]
+                self.parent.after(0, lambda: messagebox.showinfo("Finished", "Analysis complete."))
             
         except Exception as e:
-            print(f"❌ CRITICAL ERROR: {str(e)}")
-            import traceback
-            traceback.print_exc() # Stampa stack trace per debug profondo
-            messagebox.showerror("Error", f"Error during analysis:\n{str(e)}")
+            self._log_message(f"❌ CRITICAL ERROR: {str(e)}")
+            self.parent.after(0, lambda: messagebox.showerror("Error", f"Error during analysis:\n{str(e)}"))
             
         finally:
             self.is_running = False
