@@ -61,6 +61,14 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
+echo [HERMES] Installazione di pip nel venv tramite uv...
+"%UV_CMD%" pip install --python "venv\Scripts\python.exe" pip
+if %errorlevel% neq 0 (
+    echo ERRORE: Impossibile installare pip nel venv con uv.
+    pause
+    exit /b 1
+)
+
 call "venv\Scripts\activate.bat"
 if %errorlevel% neq 0 (
     echo ERRORE: Impossibile attivare l'ambiente virtuale.
@@ -85,12 +93,12 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-pip install gdown
+python -m pip install gdown
 if %errorlevel% neq 0 (
     echo AVVISO: gdown non installato. Usero fallback urllib nel downloader.
 )
 
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 if %errorlevel% neq 0 (
     echo ERRORE: Installazione dipendenze da requirements.txt fallita.
     pause
