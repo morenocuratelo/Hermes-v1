@@ -21,7 +21,7 @@ from ultralytics import YOLO  # type: ignore
 # IOU_THRESHOLD: Threshold for Non-Maximum Suppression (NMS).
 # MATCH_THRESHOLD: Specific for tracking association (e.g., BoT-SORT), determines how strictly detections are matched to existing tracks.
 CONF_THRESHOLD = 0.5
-IOU_THRESHOLD = 0.7 #Il valore 0.7 è stato selezionato in linea con gli standard dei benchmark COCO per bilanciare la soppressione delle rilevazioni ridondanti con la capacità di distinguere individui in scenari di moderato affollamento (moderate occlusion handling).
+IOU_THRESHOLD = 0.9 # Disabilitato (High Value): Il modello YOLO26 usa assegnamento one-to-one (sparse output), quindi l'NMS è ridondante. Impostiamo un valore alto per evitare soppressioni inutili e ridurre latenza.
 MATCH_THRESHOLD = 0.7 # quanto deve essere simile la nuova rilevazione rispetto alla previsione del movimento precedente per essere considerata la stessa persona.
 RANDOM_SEED = 42
 ULTRALYTICS_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/"
