@@ -61,22 +61,22 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
+set "VENV_PY=venv\Scripts\python.exe"
+if not exist "%VENV_PY%" (
+    echo ERRORE: Python del venv non trovato in %VENV_PY%.
+    pause
+    exit /b 1
+)
+
 echo [HERMES] Installazione di pip nel venv tramite uv...
-"%UV_CMD%" pip install --python "venv\Scripts\python.exe" pip
+"%UV_CMD%" pip install --python "%VENV_PY%" pip
 if %errorlevel% neq 0 (
     echo ERRORE: Impossibile installare pip nel venv con uv.
     pause
     exit /b 1
 )
 
-call "venv\Scripts\activate.bat"
-if %errorlevel% neq 0 (
-    echo ERRORE: Impossibile attivare l'ambiente virtuale.
-    pause
-    exit /b 1
-)
-
-for /f "tokens=2 delims= " %%V in ('python --version 2^>^&1') do set "PY_VER=%%V"
+for /f "tokens=2 delims= " %%V in ('"%VENV_PY%" --version 2^>^&1') do set "PY_VER=%%V"
 echo [HERMES] Python nell'ambiente: %PY_VER%
 echo %PY_VER% | findstr /b "3.12." >nul
 if %errorlevel% neq 0 (
@@ -86,19 +86,19 @@ if %errorlevel% neq 0 (
 )
 
 echo [HERMES] Installazione librerie (potrebbe richiedere tempo)...
-python -m pip install --upgrade pip
+"%VENV_PY%" -m pip install --upgrade pip
 if %errorlevel% neq 0 (
     echo ERRORE: Aggiornamento pip fallito.
     pause
     exit /b 1
 )
 
-python -m pip install gdown
+"%VENV_PY%" -m pip install gdown
 if %errorlevel% neq 0 (
     echo AVVISO: gdown non installato. Usero fallback urllib nel downloader.
 )
 
-python -m pip install -r requirements.txt
+"%VENV_PY%" -m pip install -r requirements.txt
 if %errorlevel% neq 0 (
     echo ERRORE: Installazione dipendenze da requirements.txt fallita.
     pause
@@ -106,7 +106,7 @@ if %errorlevel% neq 0 (
 )
 
 echo [HERMES] Controllo e download modelli mancanti...
-python tools\download_models.py
+"%VENV_PY%" tools\download_models.py
 if %errorlevel% neq 0 (
     echo AVVISO: Download modello non completato. Verifica URL o connessione.
 )
