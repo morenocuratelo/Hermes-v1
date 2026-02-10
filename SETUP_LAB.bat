@@ -92,12 +92,25 @@ if %errorlevel% neq 0 (
     echo AVVISO: gdown non installato. Usero fallback urllib nel downloader.
 )
 
-"%UV_CMD%" pip install --python "%VENV_PY%" -r requirements.txt
+set "REQ_FILE=requirements.txt"
+set "REQ_FILE_SETUP=requirements.setup.txt"
+
+echo [HERMES] Preparazione requirements compatibili con uv...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$c = Get-Content -LiteralPath 'requirements.txt'; $c = $c -replace '^torch==(.+)\\+cu\\d+$','torch==$1' -replace '^torchaudio==(.+)\\+cu\\d+$','torchaudio==$1' -replace '^torchvision==(.+)\\+cu\\d+$','torchvision==$1'; Set-Content -LiteralPath 'requirements.setup.txt' -Value $c -Encoding ASCII"
 if %errorlevel% neq 0 (
-    echo ERRORE: Installazione dipendenze da requirements.txt fallita.
+    echo AVVISO: Impossibile generare requirements.setup.txt. Uso requirements.txt originale.
+) else (
+    set "REQ_FILE=%REQ_FILE_SETUP%"
+)
+
+"%UV_CMD%" pip install --python "%VENV_PY%" -r "%REQ_FILE%"
+if %errorlevel% neq 0 (
+    echo ERRORE: Installazione dipendenze da %REQ_FILE% fallita.
     pause
     exit /b 1
 )
+
+if exist "%REQ_FILE_SETUP%" del /q "%REQ_FILE_SETUP%" >nul 2>&1
 
 echo [HERMES] Controllo e download modelli mancanti...
 "%VENV_PY%" tools\download_models.py
