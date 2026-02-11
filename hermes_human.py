@@ -26,6 +26,7 @@ IOU_THRESHOLD = 1.0 # CRITICO: YOLO26 è NMS-Free. Qualsiasi post-processing NMS
 MATCH_THRESHOLD = 0.8 # Standard BoT-SORT
 RANDOM_SEED = 42
 ULTRALYTICS_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/"
+TRACKERS_CONFIG_DIR = os.path.join("Configs", "Trackers")
 # Sebbene questi valori siano stati scelti come default basati sulla letteratura (COCO benchmarks), il nostro strumento espone esplicitamente questi parametri all'utente tramite GUI, permettendo una regolazione fine (fine-tuning) specifica per le condizioni di illuminazione e densità della scena analizzata, superando i limiti di un approccio 'one-size-fits-all'.
 
 
@@ -77,7 +78,7 @@ class PoseEstimatorLogic:
             if os.path.exists(dest_path): os.remove(dest_path)
             return False
 
-    def generate_tracker_config(self, params, filename="custom_tracker.yaml"):
+    def generate_tracker_config(self, params, filename="custom_tracker.yaml", config_dir=TRACKERS_CONFIG_DIR):
         lines = [
             f"tracker_type: {params.get('tracker_type', 'botsort')}",
             f"track_high_thresh: {params.get('conf', 0.5)}",
@@ -105,10 +106,14 @@ class PoseEstimatorLogic:
                 lines.append("model: osnet_x0_25_msmt17.pt")
             else:
                 lines.append("with_reid: False")
-            
-        with open(filename, 'w') as f:
+
+        tracker_filename = os.path.basename(filename)
+        tracker_path = os.path.join(config_dir, tracker_filename)
+        os.makedirs(config_dir, exist_ok=True)
+
+        with open(tracker_path, 'w') as f:
             f.write("\n".join(lines))
-        return filename
+        return tracker_path
 
     def export_to_csv_flat(self, json_gz_path, on_log=None):
         try:

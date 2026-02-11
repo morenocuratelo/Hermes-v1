@@ -6,6 +6,8 @@ yolo26x-pose.pt
 .DS_Store
 *.mp4
 hermes_global_config.json
+struttura_cartella.txt
+
 # --- Python & Ambienti ---
 __pycache__/
 *.pyc
@@ -39,6 +41,9 @@ input/
 Input/
 Output/
 runs/
+profiles/
+profiles_aoi/
+
 # Se i log vengono generati nella root
 *.log
 
