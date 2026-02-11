@@ -47,6 +47,7 @@ GC/
 *.log
 
 # --- Cartelle Temporanee & Test ---
+todolists/
 Prove/
 prova/
 prove/
