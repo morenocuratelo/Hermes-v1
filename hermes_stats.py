@@ -35,7 +35,57 @@ class StatsLogic:
         if avg_dt == 0: return 50.0
         return 1.0 / avg_dt
 
-    def run_analysis(self, mapped_path, toi_path, user_freq=None, progress_callback=None):
+    def generate_raw_dataset(self, mapped_path, toi_path, progress_callback=None):
+        """
+        Genera un dataset 'Raw' (Sample-level) arricchito con le info del TOI.
+        Ogni riga è un campionamento, con colonne Phase, Condition, Trial aggiunte.
+        """
+        if progress_callback: progress_callback("Generating Raw Dataset...")
+        
+        try:
+            df_gaze = pd.read_csv(mapped_path)
+            df_toi = pd.read_csv(toi_path, sep='\t')
+            
+            # Sort e reset index fondamentali per slicing posizionale
+            df_gaze = df_gaze.sort_values('Timestamp').reset_index(drop=True)
+            
+            # Init colonne
+            df_gaze['Phase'] = 'None'
+            df_gaze['Condition'] = 'None'
+            if 'Trial' in df_toi.columns:
+                df_gaze['Trial'] = pd.NA
+            
+            # Numpy array per ricerca veloce
+            gaze_ts = df_gaze['Timestamp'].to_numpy(dtype=np.float64)
+            
+            total = len(df_toi)
+            for i, (_, row) in enumerate(df_toi.iterrows()):
+                if self._cancel_flag: raise InterruptedError("Stopped by user")
+                if progress_callback and i % 50 == 0:
+                    progress_callback(f"Raw Data: Mapping TOI {i+1}/{total}...")
+                
+                t_start = float(row['Start'])
+                t_end = float(row['End'])
+                
+                idx_start = np.searchsorted(gaze_ts, t_start)
+                idx_end = np.searchsorted(gaze_ts, t_end)
+                
+                if idx_end > idx_start:
+                    # Assegna valori alle righe nel range (usando iloc per slicing posizionale)
+                    # Cast a int per soddisfare il type checker (get_loc può ritornare slice/array)
+                    col_phase = int(df_gaze.columns.get_loc('Phase')) # type: ignore
+                    col_cond = int(df_gaze.columns.get_loc('Condition')) # type: ignore
+                    df_gaze.iloc[idx_start:idx_end, col_phase] = row['Phase']
+                    df_gaze.iloc[idx_start:idx_end, col_cond] = row['Condition']
+                    if 'Trial' in df_toi.columns:
+                        col_trial = int(df_gaze.columns.get_loc('Trial')) # type: ignore
+                        df_gaze.iloc[idx_start:idx_end, col_trial] = row['Trial']
+                        
+            return df_gaze
+        except Exception as e:
+            raise ValueError(f"Error generating Raw Data: {e}")
+
+    def run_analysis(self, mapped_path, toi_path, user_freq=None, progress_callback=None, long_format=False):
         """
         Esegue l'analisi incrociando Gaze Data (Mapped) e TOI (Time Windows).
         Restituisce un DataFrame con una riga per ogni fase (TOI).
@@ -135,38 +185,58 @@ class StatsLogic:
                 
                 key_base = f"{r}_{a}" # Es: Target_Face
                 
-                # 1. Total Duration
+                # --- Calcolo Metriche Comuni ---
                 # Usa .get con un default sicuro se la combinazione non esiste in questo subset
                 c_val = counts.get((r, a), 0)
                 duration = c_val * sample_dur
-                res_row[f"{key_base}_Dur"] = duration
+                perc = duration / phase_dur if phase_dur > 0 else 0
                 
-                # 2. Percentage of Phase
-                res_row[f"{key_base}_Perc"] = duration / phase_dur if phase_dur > 0 else 0
-                
-                # 3. Latency (Time to First Fixation)
+                # Latency
+                latency = None
                 if (r, a) in first_hits.index:
                     first_ts = first_hits.get((r, a))
-                    # Check if first_ts is not None before performing subtraction
                     if first_ts is not None:
                         latency = first_ts - t_start
-                        res_row[f"{key_base}_Latency"] = latency
-                    else:
-                        res_row[f"{key_base}_Latency"] = None
-                else:
-                    res_row[f"{key_base}_Latency"] = None # Mai guardato
 
-                # 4. Glance Count (Numero di volte che lo sguardo è ENTRATO nell'AOI)
+                # Glances
+                glances = 0
                 if c_val > 0:
-                    # Crea maschera booleana: 1 dove guardo questa AOI, 0 altrimenti
                     mask = (subset['Hit_Role'] == r) & (subset['Hit_AOI'] == a)
-                    # Shift per trovare differenze: (Attuale=1) AND (Precedente=0/False)
-                    transitions = (mask & ~mask.shift(1).fillna(False)).sum()
-                    res_row[f"{key_base}_Glances"] = transitions
-                else:
-                    res_row[f"{key_base}_Glances"] = 0
+                    glances = (mask & ~mask.shift(1).fillna(False)).sum()
 
-            results.append(res_row)
+                # --- Output Formatting ---
+                if long_format:
+                    # LONG FORMAT (Tidy Data): Una riga per ogni combinazione (Fase, Ruolo, AOI)
+                    # Copia i dati base della fase
+                    row_long = res_row.copy()
+                    # Rimuovi metriche aggregate se presenti (opzionale, qui non ci sono ancora)
+                    
+                    row_long['Hit_Role'] = r
+                    row_long['Hit_AOI'] = a
+                    row_long['Duration'] = duration
+                    row_long['Percentage'] = perc
+                    row_long['Latency'] = latency
+                    row_long['Glances'] = glances
+                    
+                    results.append(row_long)
+                
+                else:
+                    # WIDE FORMAT (Classic): Una riga per Fase, colonne estese
+                    
+                    # 1. Total Duration
+                    res_row[f"{key_base}_Dur"] = duration
+                    
+                    # 2. Percentage of Phase
+                    res_row[f"{key_base}_Perc"] = perc
+                    
+                    # 3. Latency (Time to First Fixation)
+                    res_row[f"{key_base}_Latency"] = latency
+
+                    # 4. Glance Count
+                    res_row[f"{key_base}_Glances"] = glances
+
+            if not long_format:
+                results.append(res_row)
 
         if not results:
             return None
@@ -178,6 +248,13 @@ class StatsLogic:
         cols = list(df_results.columns)
         # Identifica le colonne base (dal TOI o generali)
         base_cols = [c for c in cols if c in df_toi.columns or c in ['Gaze_Samples_Total', 'Gaze_Valid_Time', 'Tracking_Ratio']]
+        
+        if long_format:
+            # Per Long format aggiungiamo le chiavi di raggruppamento alle base cols
+            base_cols.extend(['Hit_Role', 'Hit_AOI'])
+            # Rimuovi duplicati mantenendo ordine
+            base_cols = list(dict.fromkeys(base_cols))
+            
         # Le altre sono metriche
         metric_cols = sorted([c for c in cols if c not in base_cols])
         
@@ -200,6 +277,9 @@ class GazeStatsView:
         
         # Variabili UI
         self.gaze_freq = tk.DoubleVar(value=0.0) # 0 = Auto-detect
+        self.var_raw = tk.BooleanVar(value=False)
+        self.var_long = tk.BooleanVar(value=False)
+        
         self.status_var = tk.StringVar(value="Ready.")
         
         self._build_ui()
@@ -240,6 +320,11 @@ class GazeStatsView:
         tk.Label(f_freq, text="Forced Frequency (Hz):", bg="white").pack(side=tk.LEFT)
         tk.Entry(f_freq, textvariable=self.gaze_freq, width=8).pack(side=tk.LEFT, padx=5)
         tk.Label(f_freq, text="(Leave 0 for Auto-Detect from timestamps)", fg="gray", bg="white").pack(side=tk.LEFT)
+        
+        # Checkboxes
+        f_chk = tk.Frame(lf_set, bg="white"); f_chk.pack(fill=tk.X, pady=5)
+        tk.Checkbutton(f_chk, text="Export Raw Data (Sample-level with Phase info)", variable=self.var_raw, bg="white").pack(anchor="w")
+        tk.Checkbutton(f_chk, text="Use Long Format (Tidy Data) for Stats Report", variable=self.var_long, bg="white").pack(anchor="w")
 
         # 3. Action
         self.btn_run = tk.Button(main, text="GENERATE FULL REPORT", bg="#4CAF50", fg="white", 
@@ -286,17 +371,26 @@ class GazeStatsView:
 
         def worker():
             try:
-                df_result = self.logic.run_analysis(
+                # 1. Stats Analysis
+                df_stats = self.logic.run_analysis(
                     mapped, toi, user_freq=freq,
-                    progress_callback=self._update_status
+                    progress_callback=self._update_status,
+                    long_format=self.var_long.get()
                 )
                 
-                if df_result is not None:
+                # 2. Raw Data (Optional)
+                df_raw = None
+                if self.var_raw.get():
+                    df_raw = self.logic.generate_raw_dataset(
+                        mapped, toi, progress_callback=self._update_status
+                    )
+                
+                if df_stats is not None:
                     # Save Logic
                     default_name = mapped.replace("_MAPPED.csv", "_FINAL_STATS.csv")
                     if default_name == mapped: default_name += "_stats.csv"
                     
-                    self.parent.after(0, lambda: self._save_results(df_result, default_name))
+                    self.parent.after(0, lambda: self._save_results(df_stats, df_raw, default_name))
                 else:
                     self.parent.after(0, lambda: messagebox.showwarning("Empty", "No results generated. Check time alignment between files."))
                     self.parent.after(0, self._reset_ui)
@@ -313,7 +407,7 @@ class GazeStatsView:
     def _update_status(self, msg):
         self.parent.after(0, lambda: self.status_var.set(msg))
 
-    def _save_results(self, df, default_path):
+    def _save_results(self, df_stats, df_raw, default_path):
         self.progress.stop()
         out = filedialog.asksaveasfilename(
             initialfile=os.path.basename(default_path),
@@ -323,8 +417,17 @@ class GazeStatsView:
         
         if out:
             try:
-                df.to_csv(out, index=False)
-                messagebox.showinfo("Success", f"Report saved successfully!\n\nRows: {len(df)}\nPath: {out}")
+                # Save Stats
+                df_stats.to_csv(out, index=False)
+                msg = f"Stats Report saved: {len(df_stats)} rows.\nPath: {out}"
+                
+                # Save Raw if present
+                if df_raw is not None:
+                    out_raw = out.replace(".csv", "_RAW.csv")
+                    df_raw.to_csv(out_raw, index=False)
+                    msg += f"\n\nRaw Data saved: {len(df_raw)} rows.\nPath: {out_raw}"
+                
+                messagebox.showinfo("Success", msg)
             except Exception as e:
                 messagebox.showerror("Save Error", str(e))
         
