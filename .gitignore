@@ -1,13 +1,3 @@
-GC/
-yolo26x-pose.pt
-*.pyc
-*.pt
-*.pth
-.DS_Store
-*.mp4
-hermes_global_config.json
-struttura_cartella.txt
-
 # --- Python & Ambienti ---
 __pycache__/
 *.pyc
@@ -27,43 +17,42 @@ build/
 dist/
 *.spec
 
-# --- Output di Runtime (CRITICO) ---
-# Ignora le cartelle dove vengono salvati i risultati dei test
+# --- Modelli e Pesi (CRITICO) ---
+# I file >100MB bloccano il push su GitHub standard.
+*.pt
+*.pth
+*.onnx
+yolo26x-pose.pt
+Models/*.pt
+Models/OG/*.pth
+# !Models/placeholder.txt
+
+# --- Configurazioni & File Specifici ---
+hermes_global_config.json
+hermes_config.json
+struttura_cartella.txt
+
+# --- Media & Input ---
+*.mp4
+input/
+Input/
+
+# --- Output di Runtime & Logs ---
+output/
+Output/
+runs/
+profiles/
+profiles_aoi/
+GC/
+*.log
+
+# --- Cartelle Temporanee & Test ---
 Prove/
+prova/
+prove/
 prova1/
 prova2/
 prova3/
 prova4/
 prova5/
 prova6/
-output/
-input/
-Input/
-Output/
-runs/
-profiles/
-profiles_aoi/
-
-# Se i log vengono generati nella root
-*.log
-
-# --- Modelli e Pesi (CRITICO) ---
-# I file >100MB bloccano il push su GitHub standard.
-# È preferibile ignorarli e farli scaricare dallo script di setup.
-*.pt
-*.pth
-*.onnx
-Models/*.pt
-Models/OG/*.pth
-# Eccezione: se vuoi mantenere un file "segnaposto" o piccolo, usa !
-# !Models/placeholder.txt
-
-# --- Configurazioni Locali ---
-# Mantieni il template (default) ma ignora la config attiva se viene modificata
-# Assicurati di avere 'hermes_global_config.default.json' versionato
-hermes_config.json
-
-# --- Cartelle Temporanee Utente ---
-# Cartelle specifiche menzionate da te
-prova/
-prove/
