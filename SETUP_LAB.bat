@@ -1,7 +1,8 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-set "SETUP_VERSION=2026-02-11-uv3"
+set "SETUP_VERSION=2026-02-11-uv5"
+set "PYTHON_VERSION=3.12"
 
 echo [HERMES] Inizio configurazione automatica...
 echo [HERMES] Script: SETUP_LAB.bat ^| Versione: %SETUP_VERSION%
@@ -42,10 +43,10 @@ if not defined UV_CMD (
 )
 
 echo [HERMES] Uso uv: %UV_CMD%
-echo [HERMES] Installazione di Python 3.12...
-"%UV_CMD%" python install 3.12
+echo [HERMES] Installazione di Python %PYTHON_VERSION%...
+"%UV_CMD%" python install %PYTHON_VERSION%
 if %errorlevel% neq 0 (
-    echo ERRORE: Impossibile installare Python 3.12 con uv.
+    echo ERRORE: Impossibile installare Python %PYTHON_VERSION% con uv.
     pause
     exit /b 1
 )
@@ -55,10 +56,10 @@ if exist "venv" (
     rmdir /s /q venv
 )
 
-echo [HERMES] Creazione ambiente virtuale con Python 3.12...
-"%UV_CMD%" venv --python 3.12 --seed venv
+echo [HERMES] Creazione ambiente virtuale con Python %PYTHON_VERSION%...
+"%UV_CMD%" venv --python %PYTHON_VERSION% --seed venv
 if %errorlevel% neq 0 (
-    echo ERRORE: Impossibile creare l'ambiente virtuale con Python 3.12.
+    echo ERRORE: Impossibile creare l'ambiente virtuale con Python %PYTHON_VERSION%.
     pause
     exit /b 1
 )
@@ -79,9 +80,9 @@ if %errorlevel% neq 0 (
 echo [HERMES] Verifica Python nell'ambiente...
 for /f "tokens=2 delims= " %%V in ('"%VENV_PY%" --version 2^>^&1') do set "PY_VER=%%V"
 echo [HERMES] Python nell'ambiente: %PY_VER%
-echo %PY_VER% | findstr /b "3.12." >nul
+echo %PY_VER% | findstr /b "%PYTHON_VERSION%." >nul
 if %errorlevel% neq 0 (
-    echo ERRORE: L'ambiente virtuale non sta usando Python 3.12.
+    echo ERRORE: L'ambiente virtuale non sta usando Python %PYTHON_VERSION%.
     pause
     exit /b 1
 )
@@ -95,8 +96,14 @@ if %errorlevel% neq 0 (
 set "REQ_FILE=requirements.txt"
 set "REQ_FILE_SETUP=requirements.setup.txt"
 
+if not exist "%REQ_FILE%" (
+    echo ERRORE: File %REQ_FILE% non trovato.
+    pause
+    exit /b 1
+)
+
 echo [HERMES] Preparazione requirements compatibili con uv...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$c = Get-Content -LiteralPath 'requirements.txt'; $c = $c -replace '^torch==(.+)\\+cu\\d+$','torch==$1' -replace '^torchaudio==(.+)\\+cu\\d+$','torchaudio==$1' -replace '^torchvision==(.+)\\+cu\\d+$','torchvision==$1'; Set-Content -LiteralPath 'requirements.setup.txt' -Value $c -Encoding ASCII"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$c = Get-Content -LiteralPath 'requirements.txt'; $c = $c -replace '^\s*torch==(.+)\\+cu\\d+$','torch==$1' -replace '^\s*torchaudio==(.+)\\+cu\\d+$','torchaudio==$1' -replace '^\s*torchvision==(.+)\\+cu\\d+$','torchvision==$1'; Set-Content -LiteralPath 'requirements.setup.txt' -Value $c -Encoding ASCII"
 if %errorlevel% neq 0 (
     echo AVVISO: Impossibile generare requirements.setup.txt. Uso requirements.txt originale.
 ) else (
@@ -105,9 +112,23 @@ if %errorlevel% neq 0 (
 
 "%UV_CMD%" pip install --python "%VENV_PY%" -r "%REQ_FILE%"
 if %errorlevel% neq 0 (
-    echo ERRORE: Installazione dipendenze da %REQ_FILE% fallita.
+    echo.
+    echo [HERMES] ERRORE: Installazione dipendenze fallita.
+    echo.
+    echo Se il problema riguarda CUDA o versioni non trovate:
+    echo 1. Modifica manualmente "requirements.txt" rimuovendo suffissi come "+cu130".
+    echo 2. Salva il file.
+    echo.
+    echo Premi un tasto per riprovare l'installazione usando "requirements.txt" manuale...
     pause
-    exit /b 1
+    
+    "%UV_CMD%" pip install --python "%VENV_PY%" -r "requirements.txt"
+    if %errorlevel% neq 0 (
+        echo.
+        echo [HERMES] ATTENZIONE: Anche il secondo tentativo e' fallito.
+        echo Continuo con il resto dello script, ma l'applicazione potrebbe non funzionare correttamente. Installa i requisiti manualmente (pip install -r requirements.txt).
+        pause
+    )
 )
 
 if exist "%REQ_FILE_SETUP%" del /q "%REQ_FILE_SETUP%" >nul 2>&1
