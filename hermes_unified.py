@@ -80,17 +80,20 @@ class ProjectWizard:
 
     def create_project(self):
         parent_dir = filedialog.askdirectory(title="Select Parent Folder")
-        if not parent_dir: return
+        if not parent_dir:
+            return
         
         name = simpledialog.askstring("New Project", "Project Name:")
-        if not name: return
+        if not name:
+            return
         
         try:
             self.context.create_project(parent_dir, name)
             # Aggiunge subito un partecipante di default
             if messagebox.askyesno("Setup", "Create first participant now?"):
                 pid = simpledialog.askstring("Participant", "ID (e.g. P001):", initialvalue="P001")
-                if pid: self.context.add_participant(pid)
+                if pid:
+                    self.context.add_participant(pid)
             
             self.win.destroy()
             self.on_complete()
@@ -159,7 +162,8 @@ class HermesUnifiedApp:
 
     def _refresh_sidebar(self):
         # Clear sidebar
-        for w in self.sidebar.winfo_children(): w.destroy()
+        for w in self.sidebar.winfo_children():
+            w.destroy()
         
         # A. Header
         f_head = ttk.Frame(self.sidebar, padding=15)
@@ -246,7 +250,8 @@ class HermesUnifiedApp:
         self.root.protocol("WM_DELETE_WINDOW", self.root.destroy)
 
         # Clear Content
-        for w in self.content_area.winfo_children(): w.destroy()
+        for w in self.content_area.winfo_children():
+            w.destroy()
         
         # Instantiate View
         try:
@@ -270,7 +275,8 @@ class HermesUnifiedApp:
             self._load_module(mod, cls)
 
     def _show_welcome(self):
-        for w in self.content_area.winfo_children(): w.destroy()
+        for w in self.content_area.winfo_children():
+            w.destroy()
         f = ttk.Frame(self.content_area)
         f.place(relx=0.5, rely=0.5, anchor="center")
         ttk.Label(f, text="HERMES Project Loaded", font=("Segoe UI", 20)).pack()
@@ -278,7 +284,8 @@ class HermesUnifiedApp:
         ttk.Label(f, text="Select a Participant and a Module from the sidebar to begin.", foreground="gray").pack(pady=20)
 
     def _show_error(self, msg):
-        for w in self.content_area.winfo_children(): w.destroy()
+        for w in self.content_area.winfo_children():
+            w.destroy()
         f = ttk.Frame(self.content_area)
         f.place(relx=0.5, rely=0.5, anchor="center")
         ttk.Label(f, text="⚠️ Module Error", font=("Segoe UI", 20), foreground="red").pack()

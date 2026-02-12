@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import filedialog, messagebox
 import cv2
 import pandas as pd
 import bisect
@@ -25,7 +25,8 @@ class TimelineWidget(tk.Canvas):
             cond_map = {}
             for _, row in df_tois.iterrows():
                 cond = str(row.get('Condition', 'Base'))
-                if cond not in cond_map: cond_map[cond] = colors[len(cond_map) % len(colors)]
+                if cond not in cond_map:
+                    cond_map[cond] = colors[len(cond_map) % len(colors)]
                 self.tois.append({
                     's': row['Start'], 'e': row['End'], 
                     'c': cond_map[cond], 'n': row['Name']
@@ -35,7 +36,8 @@ class TimelineWidget(tk.Canvas):
     def redraw(self):
         self.delete("all")
         w, h = self.winfo_width(), self.winfo_height()
-        if self.duration <= 0: return
+        if self.duration <= 0:
+            return
         
         # Disegna blocchi TOI
         for t in self.tois:
@@ -82,7 +84,8 @@ class ReviewerView:
         # Controlli File
         fr_files = tk.LabelFrame(self.parent, text="Load Data")
         fr_files.pack(fill=tk.X, padx=5)
-        btn_fr = tk.Frame(fr_files); btn_fr.pack(fill=tk.X)
+        btn_fr = tk.Frame(fr_files)
+        btn_fr.pack(fill=tk.X)
         tk.Button(btn_fr, text="Video", command=self.load_video).pack(side=tk.LEFT)
         tk.Button(btn_fr, text="TOI (.tsv)", command=self.load_tois).pack(side=tk.LEFT)
         tk.Button(btn_fr, text="Gaze (.csv)", command=self.load_gaze).pack(side=tk.LEFT)
@@ -119,8 +122,10 @@ class ReviewerView:
                     break
 
     def load_video(self, path=None):
-        if not path: path = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.avi")])
-        if not path: return
+        if not path:
+            path = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.avi")])
+        if not path:
+            return
         self.cap = cv2.VideoCapture(path)
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
         frames = self.cap.get(cv2.CAP_PROP_FRAME_COUNT)
@@ -129,23 +134,27 @@ class ReviewerView:
         self.show_frame()
 
     def load_tois(self, path=None):
-        if not path: path = filedialog.askopenfilename(filetypes=[("TOI", "*.tsv *.csv")])
-        if not path: return
+        if not path:
+            path = filedialog.askopenfilename(filetypes=[("TOI", "*.tsv *.csv")])
+        if not path:
+            return
         try:
             self.df_tois = pd.read_csv(path, sep='\t' if path.endswith('.tsv') else ',')
-            if self.cap: self.timeline.set_data(self.total_duration, self.df_tois)
+            if self.cap:
+                self.timeline.set_data(self.total_duration, self.df_tois)
             messagebox.showinfo("OK", f"Loaded {len(self.df_tois)} TOIs")
-        except Exception as e: messagebox.showerror("Error", str(e))
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
 
     def load_gaze(self, path=None):
-        if not path: path = filedialog.askopenfilename(filetypes=[("Gaze", "*.csv")])
-        if not path: return
+        if not path:
+            path = filedialog.askopenfilename(filetypes=[("Gaze", "*.csv")])
+        if not path:
+            return
         try:
             # Caricamento ottimizzato: assume colonne Timestamp (sec), GazeX, GazeY
             # Adatta i nomi delle colonne in base al tuo CSV!
             df = pd.read_csv(path)
-            # Cerchiamo colonne comuni
-            cols = [c.lower() for c in df.columns]
             
             # Logica base per trovare le colonne giuste
             t_col = next((c for c in df.columns if 'time' in c.lower()), None)
@@ -160,11 +169,13 @@ class ReviewerView:
                 messagebox.showinfo("OK", "Gaze loaded successfully")
             else:
                 messagebox.showwarning("Warning", f"Gaze columns not found in: {df.columns}")
-        except Exception as e: messagebox.showerror("Error", str(e))
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
 
     def toggle_play(self):
         self.is_playing = not self.is_playing
-        if self.is_playing: self.loop()
+        if self.is_playing:
+            self.loop()
 
     def seek(self, sec):
         if self.cap:
@@ -183,7 +194,8 @@ class ReviewerView:
     def show_frame(self):
         if self.cap:
             ret, frame = self.cap.read()
-            if ret: self.process_frame(frame)
+            if ret:
+                self.process_frame(frame)
 
     def process_frame(self, frame):
         # 1. Info Tempo
@@ -225,7 +237,8 @@ class ReviewerView:
         
         # Resize per la finestra
         c_w, c_h = self.lbl_vid.winfo_width(), self.lbl_vid.winfo_height()
-        if c_w > 10: img.thumbnail((c_w, c_h))
+        if c_w > 10:
+            img.thumbnail((c_w, c_h))
         
         imgtk = ImageTk.PhotoImage(image=img)
         self.lbl_vid.imgtk = imgtk # Keep reference!

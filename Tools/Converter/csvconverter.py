@@ -1,6 +1,5 @@
 import pandas as pd
 import os
-import sys
 
 def convert_csv_to_excel_ita():
     # Richiesta input utente

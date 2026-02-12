@@ -1,4 +1,3 @@
-import sys
 from pathlib import Path
 
 def generate_file_structure(root_dir: str, output_file: str) -> None:

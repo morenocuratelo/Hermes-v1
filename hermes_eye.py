@@ -127,20 +127,25 @@ class GazeLogic:
 
         with gzip.open(gaze_path, 'rt', encoding='utf-8') as f:
             for line in f:
-                if self._cancel_flag: raise InterruptedError("Mapping cancelled by user.")
+                if self._cancel_flag:
+                    raise InterruptedError("Mapping cancelled by user.")
                 try:
                     gaze_pkg = json.loads(line)
-                except json.JSONDecodeError: continue
+                except json.JSONDecodeError:
+                    continue
 
-                if 'data' not in gaze_pkg or 'gaze2d' not in gaze_pkg['data']: continue
+                if 'data' not in gaze_pkg or 'gaze2d' not in gaze_pkg['data']:
+                    continue
 
                 ts = gaze_pkg.get('timestamp', 0)
                 g2d = gaze_pkg['data']['gaze2d']
-                if not g2d: continue
+                if not g2d:
+                    continue
 
                 gx, gy = g2d[0], g2d[1]
                 frame_idx = self.timestamp_to_frame(ts, offset, fps)
-                if frame_idx < 0: continue
+                if frame_idx < 0:
+                    continue
 
                 px, py = self.normalised_to_pixel(gx, gy, W, H)
 
@@ -355,7 +360,7 @@ class GazeView:
         except InterruptedError:
             self.parent.after(0, self._on_cancelled)
         except Exception as e:
-            self.parent.after(0, lambda: self._on_error(e))
+            self.parent.after(0, lambda e=e: self._on_error(e))
 
     # ── Thread-safe UI callbacks ────────────────────────────────
 

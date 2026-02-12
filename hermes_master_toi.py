@@ -1,4 +1,3 @@
-from json.tool import main
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import json
@@ -15,10 +14,12 @@ class ProfileManager:
         if not os.path.exists(self.profiles_dir):
             try:
                 os.makedirs(self.profiles_dir)
-            except OSError: pass # Già esiste o permessi
+            except OSError:
+                pass # Già esiste o permessi
 
     def get_available_profiles(self):
-        if not os.path.exists(self.profiles_dir): return []
+        if not os.path.exists(self.profiles_dir):
+            return []
         return [f for f in os.listdir(self.profiles_dir) if f.endswith(".json")]
 
     def load_profile(self, filename):
@@ -31,7 +32,8 @@ class TOIGenerator:
     def parse_time_string(time_str):
         """Converte stringhe 'HH:MM:SS.mmm' in secondi totali."""
         try:
-            if pd.isna(time_str): return None
+            if pd.isna(time_str):
+                return None
             # If data comes from .mat, it might already be a float/int
             if isinstance(time_str, (float, int)):
                 return float(time_str)
@@ -44,7 +46,8 @@ class TOIGenerator:
                     break
                 except ValueError:
                     continue
-            if dt is None: return None
+            if dt is None:
+                return None
             return dt.hour * 3600 + dt.minute * 60 + dt.second + dt.microsecond / 1e6
         except Exception:
             return None
@@ -173,10 +176,12 @@ class TOIGenerator:
             for col in cols_seq:
                 ts = TOIGenerator.parse_time_string(row.get(col))
                 if ts is None:
-                    valid_trial = False; break
+                    valid_trial = False
+                    break
                 seq_times.append(ts + delta_seconds)
             
-            if not valid_trial: continue
+            if not valid_trial:
+                continue
 
             for i in range(len(seq_times) - 1):
                 start_t = seq_times[i]
@@ -337,7 +342,8 @@ class TOIGeneratorView:
     def refresh_profiles(self):
         v = self.pm.get_available_profiles()
         self.cb['values'] = v
-        if v: self.selected_profile.set(v[0])
+        if v:
+            self.selected_profile.set(v[0])
 
     def browse(self, var, ft):
         f = filedialog.askopenfilename(filetypes=[("File", ft)])
@@ -355,7 +361,8 @@ class TOIGeneratorView:
 
     def save_as(self):
         f = filedialog.asksaveasfilename(defaultextension=".tsv", filetypes=[("TSV", "*.tsv")])
-        if f: self.output_file.set(f)
+        if f:
+            self.output_file.set(f)
 
     def run(self):
         if not self.selected_profile.get(): 
@@ -412,7 +419,7 @@ class DataCropper:
             # 1. Trova il tempo di inizio minimo dai TOI
             try:
                 df_toi = pd.read_csv(toi_path, sep='\t')
-            except:
+            except Exception:
                 # Fallback se il separatore fosse diverso
                 df_toi = pd.read_csv(toi_path)
 
@@ -454,7 +461,7 @@ class DataCropper:
                     except json.JSONDecodeError:
                         continue
 
-            print(f"✅ Pruning complete.")
+            print("✅ Pruning complete.")
             print(f"   Frames removed:   {dropped_frames}")
             print(f"   Frames kept: {kept_frames}")
             print(f"   Saved in:      {os.path.basename(new_path)}")

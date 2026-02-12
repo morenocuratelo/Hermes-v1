@@ -145,7 +145,8 @@ class ProfileWizard:
 
     def load_json_sample(self):
         path = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
-        if not path: return
+        if not path:
+            return
         try:
             with open(path, 'r') as f:
                 data = json.load(f)
@@ -154,13 +155,16 @@ class ProfileWizard:
             labels = set()
             if isinstance(data, list):
                 for e in data:
-                    if 'label' in e: labels.add(e['label'])
+                    if 'label' in e:
+                        labels.add(e['label'])
             elif isinstance(data, dict):
-                 if 'label' in data: labels.add(data['label'])
+                if 'label' in data:
+                    labels.add(data['label'])
             
             self.loaded_json_events = sorted(list(labels))
             self.combo_tobii_event['values'] = self.loaded_json_events
-            if self.loaded_json_events: self.combo_tobii_event.current(0)
+            if self.loaded_json_events:
+                self.combo_tobii_event.current(0)
             
             self.lbl_json_status.config(text=f"OK! Trovati {len(labels)} eventi.", fg="green")
         except Exception as e:
@@ -168,7 +172,8 @@ class ProfileWizard:
 
     def load_csv_sample(self):
         path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv"), ("Text", "*.txt"), ("All", "*.*")])
-        if not path: return
+        if not path:
+            return
         
         try:
             # --- MODIFICA CRITICA: Rilevamento automatico separatore ---
@@ -227,9 +232,11 @@ class ProfileWizard:
 
     def add_fixed_phase_dialog(self):
         name = simpledialog.askstring("Nuova Fase", "Nome della fase (es. ITI):")
-        if not name: return
+        if not name:
+            return
         dur = simpledialog.askfloat("Durata", "Durata in secondi (es. 10.0):")
-        if dur is None: return
+        if dur is None:
+            return
         self.tree_fixed.insert("", tk.END, values=(name, dur))
 
     def remove_fixed_phase(self):

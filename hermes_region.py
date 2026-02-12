@@ -6,7 +6,6 @@ import gzip
 import os
 import threading
 import pandas as pd
-import numpy as np
 from PIL import Image, ImageTk
 
 # ═══════════════════════════════════════════════════════════════════
@@ -572,15 +571,24 @@ class RegionView:
         return True
 
     def _on_space(self, event):
-        if self._is_hotkey_safe(): self.toggle_play()
+        if self._is_hotkey_safe():
+            self.toggle_play()
+
     def _on_left(self, event):
-        if self._is_hotkey_safe(): self.seek_relative(-1)
+        if self._is_hotkey_safe():
+            self.seek_relative(-1)
+
     def _on_right(self, event):
-        if self._is_hotkey_safe(): self.seek_relative(1)
+        if self._is_hotkey_safe():
+            self.seek_relative(1)
+
     def _on_shift_left(self, event):
-        if self._is_hotkey_safe(): self.seek_relative(-10)
+        if self._is_hotkey_safe():
+            self.seek_relative(-10)
+
     def _on_shift_right(self, event):
-        if self._is_hotkey_safe(): self.seek_relative(10)
+        if self._is_hotkey_safe():
+            self.seek_relative(10)
 
     def seek_relative(self, delta):
         if not self.cap:
@@ -607,7 +615,8 @@ class RegionView:
 
         # --- Section 1: Name ---
         tk.Label(win, text="1. Profile Name", font=("Bold", 12)).pack(pady=(10, 5))
-        f_name = tk.Frame(win); f_name.pack(fill=tk.X, padx=20)
+        f_name = tk.Frame(win)
+        f_name.pack(fill=tk.X, padx=20)
         tk.Label(f_name, text="Filename:").pack(side=tk.LEFT)
         tk.Entry(f_name, textvariable=v_name).pack(side=tk.RIGHT, fill=tk.X, expand=True)
 
@@ -641,13 +650,15 @@ class RegionView:
         sb.pack(side="right", fill="y")
 
         def refresh_roles_ui(roles_set):
-            for w in frame_roles.winfo_children(): w.destroy()
+            for w in frame_roles.winfo_children():
+                w.destroy()
             self.strat_vars.clear()
 
             roles_set.discard("Ignore")
             roles_set.discard("Noise")
             roles_set.discard("Unknown")
-            if not roles_set: roles_set = {"Target"}
+            if not roles_set:
+                roles_set = {"Target"}
             roles_set.add("DEFAULT")
 
             tk.Label(frame_roles, text="Role",     font=("Bold", 9)).grid(row=0, column=0, sticky="w", padx=5)
@@ -673,7 +684,8 @@ class RegionView:
         tk.Label(win, text="3. Geometric Parameters (AOI)", font=("Bold", 12)).pack(pady=(15, 5))
 
         def add_field(p, lbl, var):
-            f = tk.Frame(p); f.pack(fill=tk.X, padx=30, pady=2)
+            f = tk.Frame(p)
+            f.pack(fill=tk.X, padx=30, pady=2)
             tk.Label(f, text=lbl).pack(side=tk.LEFT)
             tk.Spinbox(f, from_=0, to=500, textvariable=var, width=8).pack(side=tk.RIGHT)
 
@@ -682,14 +694,16 @@ class RegionView:
         add_field(win, "Feet Margin (px):",       v_feet_m)
         add_field(win, "Feet Bottom Offset (px):", v_feet_off)
 
-        f = tk.Frame(win); f.pack(fill=tk.X, padx=30, pady=2)
+        f = tk.Frame(win)
+        f.pack(fill=tk.X, padx=30, pady=2)
         tk.Label(f, text="Peripersonal Expansion (x):").pack(side=tk.LEFT)
         tk.Spinbox(f, from_=1.0, to=5.0, increment=0.1, textvariable=v_peri_exp, width=8).pack(side=tk.RIGHT)
 
         # --- Save ---
         def save_wiz():
             name = v_name.get().strip()
-            if not name.endswith(".json"): name += ".json"
+            if not name.endswith(".json"):
+                name += ".json"
 
             def build_rules(strategy_code):
                 if strategy_code == 1:
@@ -724,8 +738,10 @@ class RegionView:
     # ── Rule Editors ────────────────────────────────────────────
 
     def refresh_editors(self):
-        for widget in self.frame_target.winfo_children(): widget.destroy()
-        for widget in self.frame_others.winfo_children(): widget.destroy()
+        for widget in self.frame_target.winfo_children():
+            widget.destroy()
+        for widget in self.frame_others.winfo_children():
+            widget.destroy()
         self._build_role_editor(self.frame_target, "Target")
         self._build_role_editor(self.frame_others, "DEFAULT")
 
@@ -800,7 +816,8 @@ class RegionView:
 
     def browse_video(self):
         f = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.avi")])
-        if f: self.load_video_direct(f)
+        if f:
+            self.load_video_direct(f)
 
     def load_video_direct(self, path):
         if not os.path.exists(path):
@@ -817,7 +834,8 @@ class RegionView:
 
     def browse_pose(self):
         f = filedialog.askopenfilename(filetypes=[("Pose JSON", "*.json.gz")])
-        if f: self.load_pose_direct(f)
+        if f:
+            self.load_pose_direct(f)
 
     def load_pose_direct(self, path):
         if not os.path.exists(path):
@@ -830,11 +848,12 @@ class RegionView:
                     path, progress_callback=lambda m: print(m)
                 )
                 self.parent.after(0, lambda: self._on_pose_loaded(count))
-            except Exception as e:
+            except Exception as exc:
                 import traceback
                 traceback.print_exc()
+                err_msg = f"Error loading poses: {exc}"
                 self.parent.after(0, lambda: messagebox.showerror(
-                    "Error", f"Error loading poses: {str(e)}"))
+                    "Error", err_msg))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -844,7 +863,8 @@ class RegionView:
 
     def browse_identity(self):
         f = filedialog.askopenfilename(filetypes=[("Identity", "*.json")])
-        if f: self.load_identity_direct(f)
+        if f:
+            self.load_identity_direct(f)
 
     def load_identity_direct(self, path):
         if not os.path.exists(path):
@@ -878,7 +898,9 @@ class RegionView:
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(frame)
         w, h = self.lbl_video.winfo_width(), self.lbl_video.winfo_height()
-        if w < 10: w = 800; h = 600
+        if w < 10:
+            w = 800
+            h = 600
         img.thumbnail((w, h), Image.Resampling.BILINEAR)
         self.tk_img = ImageTk.PhotoImage(image=img)
         self.lbl_video.config(image=self.tk_img)
@@ -921,8 +943,9 @@ class RegionView:
                     progress_callback=lambda m: print(m)
                 )
                 self.parent.after(0, lambda: self._on_export_done(out, count))
-            except Exception as e:
-                self.parent.after(0, lambda: messagebox.showerror("Export Error", str(e)))
+            except Exception as exc:
+                err_msg = str(exc)
+                self.parent.after(0, lambda: messagebox.showerror("Export Error", err_msg))
 
         threading.Thread(target=_worker, daemon=True).start()
 

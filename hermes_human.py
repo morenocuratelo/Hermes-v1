@@ -19,7 +19,7 @@ from ultralytics import YOLO  # type: ignore
 # --- RESEARCH PARAMETERS & HEURISTICS (CONSTANTS) ---
 # Globally exposed for reproducibility and tuning. Here are initialised, but can be adjusted by the user via the UI sliders.
 # CONF_THRESHOLD: Conservative threshold to balance Precision and Recall.
-# IOU_THRESHOLD: Threshold for Non-Maximum Suppression (NMS).
+# IOU_THRESHOLD: Threshold for Non-Maximum Suppression (NMS). Older versions of YOLO.
 # MATCH_THRESHOLD: Specific for tracking association (e.g., BoT-SORT), determines how strictly detections are matched to existing tracks.
 CONF_THRESHOLD = 0.6 # Manteniamo alto per purezza, come suggerito nel paper BoT-SORT originale
 IOU_THRESHOLD = 1.0 # CRITICO: YOLO26 è NMS-Free. Qualsiasi post-processing NMS è ridondante.
@@ -56,7 +56,8 @@ class PoseEstimatorLogic:
             torch.backends.cudnn.benchmark = False
 
     def download_model(self, model_name, dest_path, on_progress=None, on_log=None):
-        if on_log: on_log(f"📥 Downloading model: {model_name}...")
+        if on_log:
+            on_log(f"📥 Downloading model: {model_name}...")
         url = ULTRALYTICS_URL + model_name
         try:
             response = requests.get(url, stream=True, timeout=10)
@@ -71,11 +72,14 @@ class PoseEstimatorLogic:
                         downloaded += len(chunk)
                         if total_size > 0 and on_progress:
                             on_progress(downloaded, total_size, stage="download")
-            if on_log: on_log("✅ Download complete.")
+            if on_log:
+                on_log("✅ Download complete.")
             return True
         except Exception as e:
-            if on_log: on_log(f"❌ Download error: {e}")
-            if os.path.exists(dest_path): os.remove(dest_path)
+            if on_log:
+                on_log(f"❌ Download error: {e}")
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
             return False
 
     def generate_tracker_config(self, params, filename="custom_tracker.yaml", config_dir=TRACKERS_CONFIG_DIR):
@@ -117,7 +121,8 @@ class PoseEstimatorLogic:
 
     def export_to_csv_flat(self, json_gz_path, on_log=None):
         try:
-            if on_log: on_log("Converting output to Flattened CSV...")
+            if on_log:
+                on_log("Converting output to Flattened CSV...")
             csv_path = json_gz_path.replace(".json.gz", ".csv")
             
             kp_names = [
@@ -151,13 +156,16 @@ class PoseEstimatorLogic:
                             else:
                                 for point in kps:
                                     row.extend(point) 
-                                    if len(point) < 3: row.append(0) 
+                                    if len(point) < 3:
+                                        row.append(0) 
                             writer.writerow(row)
                             
-            if on_log: on_log(f"✅ CSV Export complete: {csv_path}")
+            if on_log:
+                on_log(f"✅ CSV Export complete: {csv_path}")
             return True
         except Exception as e:
-            if on_log: on_log(f"⚠️ CSV Export error: {e}")
+            if on_log:
+                on_log(f"⚠️ CSV Export error: {e}")
             return False
 
     def run_analysis(self, config, on_progress=None, on_log=None):
@@ -172,7 +180,8 @@ class PoseEstimatorLogic:
         models_dir = config['models_dir']
         device = config['device']
 
-        if on_log: on_log(f"--- Analysis Started ---")
+        if on_log:
+            on_log("--- Analysis Started ---")
         
         # 1. ReID Model Check
         reid_path = None
@@ -181,9 +190,11 @@ class PoseEstimatorLogic:
             reid_path = os.path.join(models_dir, reid_name)
             
             if not os.path.exists(reid_path):
-                if on_log: on_log(f"Missing ReID model, starting download: {reid_name}")
+                if on_log:
+                    on_log(f"Missing ReID model, starting download: {reid_name}")
                 if not self.download_model(reid_name, reid_path, on_progress, on_log):
-                    if on_log: on_log("⚠️ ReID download failed. Disabling ReID.")
+                    if on_log:
+                        on_log("⚠️ ReID download failed. Disabling ReID.")
                     tracker_params['with_reid'] = False
                     reid_path = None
             
@@ -193,21 +204,25 @@ class PoseEstimatorLogic:
 
         # 2. Generate Tracker Config
         tracker_config_file = self.generate_tracker_config(tracker_params, f"custom_{tracker_params['tracker_type']}.yaml")
-        if on_log: on_log(f"✅ Tracker configuration generated: {tracker_config_file}")
+        if on_log:
+            on_log(f"✅ Tracker configuration generated: {tracker_config_file}")
 
         # 3. Determinism
-        if on_log: on_log(f"Reproducibility seed: {RANDOM_SEED}")
+        if on_log:
+            on_log(f"Reproducibility seed: {RANDOM_SEED}")
         self.set_determinism(RANDOM_SEED)
 
         # 4. YOLO Model Check
         model_path = os.path.join(models_dir, model_name)
         if not os.path.exists(model_path):
-            if on_log: on_log(f"Missing model, starting download: {model_name}")
+            if on_log:
+                on_log(f"Missing model, starting download: {model_name}")
             if not self.download_model(model_name, model_path, on_progress, on_log):
                 raise Exception("Unable to download model.")
         
         # 5. Load Model
-        if on_log: on_log("Allocating YOLO weights to VRAM...")
+        if on_log:
+            on_log("Allocating YOLO weights to VRAM...")
         model = YOLO(model_path)
 
         # 6. Video Metadata
@@ -218,7 +233,8 @@ class PoseEstimatorLogic:
         fps = cap.get(cv2.CAP_PROP_FPS)
         cap.release()
 
-        if on_log: on_log(f"Starting tracking (Conf: {tracker_params['conf']}, IoU: {tracker_params['iou']})...")
+        if on_log:
+            on_log(f"Starting tracking (Conf: {tracker_params['conf']}, IoU: {tracker_params['iou']})...")
 
         # 7. Inference Loop
         is_tracker_enabled = tracker_params['tracker_type'] != "none"
@@ -237,7 +253,8 @@ class PoseEstimatorLogic:
             yolo_args["tracker"] = tracker_config_file
             results = model.track(**yolo_args)
         else:
-            if on_log: on_log("Starting analysis WITHOUT tracker (detection only)...")
+            if on_log:
+                on_log("Starting analysis WITHOUT tracker (detection only)...")
             results = model.predict(**yolo_args)
 
         with gzip.open(out_file, 'wt', encoding='utf-8') as f:
@@ -275,7 +292,8 @@ class PoseEstimatorLogic:
                 if i % 100 == 0 and on_log:
                     on_log(f"Processed Frame: {i}/{total_frames} | Tracked objects: {len(det_list)}")
 
-        if on_log: on_log(f"✅ YOLO analysis complete. JSON output saved.")
+        if on_log:
+            on_log("✅ YOLO analysis complete. JSON output saved.")
         
         # 8. CSV Export
         self.export_to_csv_flat(out_file, on_log)
@@ -425,14 +443,20 @@ class YoloView:
             self.lbl_hw.config(text=f"⚠️ WARNING: No GPU detected. CPU Mode ({self.context.device}).", fg="orange")
 
     def _add_picker(self, p, lbl, var, ft, save=False):
-        f = tk.Frame(p, bg="white"); f.pack(fill=tk.X, pady=2)
+        f = tk.Frame(p, bg="white")
+        f.pack(fill=tk.X, pady=2)
         tk.Label(f, text=lbl, width=15, anchor="w", bg="white").pack(side=tk.LEFT)
         tk.Entry(f, textvariable=var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        cmd = lambda: self.browse_save(var, ft) if save else self.browse_open(var, ft)
+        def cmd():
+            if save:
+                self.browse_save(var, ft)
+            else:
+                self.browse_open(var, ft)
         tk.Button(f, text="...", width=3, command=cmd).pack(side=tk.LEFT)
 
     def _suggest_output_name(self, video_path):
-        if not video_path: return
+        if not video_path:
+            return
         base = os.path.splitext(video_path)[0]
         if self.context.paths["output"] and os.path.exists(self.context.paths["output"]):
             filename = os.path.basename(base) + "_yolo.json.gz"
@@ -465,7 +489,8 @@ class YoloView:
         tk.Label(win, text="ByteTrack / BoT-SORT Settings", font=("Segoe UI", 10, "bold")).pack(pady=10)
         
         def add_scale(lbl, var, from_, to_, res):
-            f = tk.Frame(win); f.pack(fill=tk.X, padx=15, pady=5)
+            f = tk.Frame(win)
+            f.pack(fill=tk.X, padx=15, pady=5)
             tk.Label(f, text=lbl).pack(anchor="w")
             tk.Scale(f, from_=from_, to=to_, resolution=res, orient=tk.HORIZONTAL, variable=var).pack(fill=tk.X)
 
@@ -474,14 +499,16 @@ class YoloView:
         add_scale("Proximity Threshold (BoT-SORT):", self.proximity_thresh, 0.1, 1.0, 0.05)
         add_scale("Appearance Threshold (BoT-SORT):", self.appearance_thresh, 0.1, 1.0, 0.05)
         
-        f_chk = tk.Frame(win); f_chk.pack(fill=tk.X, padx=15, pady=15)
+        f_chk = tk.Frame(win)
+        f_chk.pack(fill=tk.X, padx=15, pady=15)
         tk.Checkbutton(f_chk, text="Enable Re-Identification (ReID)", variable=self.with_reid).pack(anchor="w")
         tk.Label(f_chk, text="(Requires automatic download of extra ReID weights)", fg="gray", font=("Arial", 8)).pack(anchor="w")
         
         tk.Button(win, text="Close", command=win.destroy, width=15).pack(pady=10)
 
     def start_thread(self):
-        if self.is_running: return
+        if self.is_running:
+            return
         if not self.video_path.get() or not self.output_path.get():
             messagebox.showwarning("Missing Data", "Select video and output.")
             return

@@ -24,15 +24,18 @@ class StatsLogic:
         Calcola la frequenza di campionamento reale dai timestamp.
         Utile se l'utente sbaglia a inserire gli Hz o se ci sono drop.
         """
-        if len(df_gaze) < 2: return 50.0
+        if len(df_gaze) < 2:
+            return 50.0
         # Calcola la differenza media tra timestamp consecutivi
         diffs = df_gaze['Timestamp'].diff().dropna()
         # Filtra gap troppo grandi (buchi dati) per non falsare la media (>100ms)
         valid_diffs = diffs[diffs < 0.1] 
-        if valid_diffs.empty: return 50.0
+        if valid_diffs.empty:
+            return 50.0
         
         avg_dt = valid_diffs.mean()
-        if avg_dt == 0: return 50.0
+        if avg_dt == 0:
+            return 50.0
         return 1.0 / avg_dt
 
     def generate_raw_dataset(self, mapped_path, toi_path, progress_callback=None):
@@ -40,7 +43,8 @@ class StatsLogic:
         Genera un dataset 'Raw' (Sample-level) arricchito con le info del TOI.
         Ogni riga è un campionamento, con colonne Phase, Condition, Trial aggiunte.
         """
-        if progress_callback: progress_callback("Generating Raw Dataset...")
+        if progress_callback:
+            progress_callback("Generating Raw Dataset...")
         
         try:
             df_gaze = pd.read_csv(mapped_path)
@@ -64,7 +68,8 @@ class StatsLogic:
             
             total = len(df_toi)
             for i, (_, row) in enumerate(df_toi.iterrows()):
-                if self._cancel_flag: raise InterruptedError("Stopped by user")
+                if self._cancel_flag:
+                    raise InterruptedError("Stopped by user")
                 if progress_callback and i % 50 == 0:
                     progress_callback(f"Raw Data: Mapping TOI {i+1}/{total}...")
                 
@@ -99,7 +104,8 @@ class StatsLogic:
         self._cancel_flag = False
         
         # 1. Caricamento Dati
-        if progress_callback: progress_callback("Loading files...")
+        if progress_callback:
+            progress_callback("Loading files...")
         
         # Carica Gaze (MAPPED)
         try:
@@ -150,7 +156,8 @@ class StatsLogic:
         
         # --- FIX PYLANCE 1: Usa enumerate per avere un indice intero sicuro ---
         for i, (orig_idx, row) in enumerate(df_toi.iterrows()):
-            if self._cancel_flag: raise InterruptedError("Stopped by user")
+            if self._cancel_flag:
+                raise InterruptedError("Stopped by user")
             
             if progress_callback and i % 10 == 0:
                 progress_callback(f"Analyzing phase {i+1}/{total_phases}...")
@@ -187,7 +194,8 @@ class StatsLogic:
             # Itera su tutte le combinazioni possibili trovate nel file intero (per avere colonne fisse anche se 0)
             for _, comb in unique_combinations.iterrows():
                 r, a = comb['Hit_Role'], comb['Hit_AOI']
-                if r == "None" or r == "Ignore": continue # Skip rumore
+                if r == "None" or r == "Ignore":
+                    continue # Skip rumore
                 
                 key_base = f"{r}_{a}" # Es: Target_Face
                 
@@ -328,7 +336,8 @@ class GazeStatsView:
         tk.Label(f_freq, text="(Leave 0 for Auto-Detect from timestamps)", fg="gray", bg="white").pack(side=tk.LEFT)
         
         # Checkboxes
-        f_chk = tk.Frame(lf_set, bg="white"); f_chk.pack(fill=tk.X, pady=5)
+        f_chk = tk.Frame(lf_set, bg="white")
+        f_chk.pack(fill=tk.X, pady=5)
         tk.Checkbutton(f_chk, text="Export Raw Data (Sample-level with Phase info)", variable=self.var_raw, bg="white").pack(anchor="w")
         tk.Checkbutton(f_chk, text="Use Long Format (Tidy Data) for Stats Report", variable=self.var_long, bg="white").pack(anchor="w")
 
@@ -344,14 +353,16 @@ class GazeStatsView:
         tk.Label(main, textvariable=self.status_var, bg="white", fg="blue").pack(pady=5)
 
     def _add_picker(self, p, lbl, var, ft):
-        f = tk.Frame(p, bg="white"); f.pack(fill=tk.X, pady=2)
+        f = tk.Frame(p, bg="white")
+        f.pack(fill=tk.X, pady=2)
         tk.Label(f, text=lbl, width=25, anchor="w", bg="white").pack(side=tk.LEFT)
         tk.Entry(f, textvariable=var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         tk.Button(f, text="...", width=3, command=lambda: self.browse(var, ft)).pack(side=tk.LEFT)
 
     def browse(self, var, ft):
         f = filedialog.askopenfilename(filetypes=[("File", ft)])
-        if f: var.set(f)
+        if f:
+            var.set(f)
 
     # ── Threading ──────────────────────────────────────────────────
 
@@ -373,7 +384,8 @@ class GazeStatsView:
         
         freq = self.gaze_freq.get()
         # Ensure 0.0 or negative is treated as None for auto-detect
-        if freq <= 0.0: freq = None 
+        if freq <= 0.0:
+            freq = None
 
         def worker():
             try:
@@ -394,7 +406,8 @@ class GazeStatsView:
                 if df_stats is not None:
                     # Save Logic
                     default_name = mapped.replace("_MAPPED.csv", "_FINAL_STATS.csv")
-                    if default_name == mapped: default_name += "_stats.csv"
+                    if default_name == mapped:
+                        default_name += "_stats.csv"
                     
                     self.parent.after(0, lambda: self._save_results(df_stats, df_raw, default_name))
                 else:

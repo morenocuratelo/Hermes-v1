@@ -145,7 +145,8 @@ class AppContext:
 
     def save_project(self):
         """Persist project metadata to JSON."""
-        if not self.project_root: return
+        if not self.project_root:
+            return
         with open(os.path.join(self.project_root, "hermes_project.json"), 'w') as f:
             json.dump(self.project_config, f, indent=4)
 
@@ -155,7 +156,8 @@ class AppContext:
 
     def add_participant(self, pid):
         """Adds a new participant folder structure."""
-        if not self.project_root: return
+        if not self.project_root:
+            return
         if pid in self.participants:
             print(f"PARTICIPANT: {pid} already exists.")
             return
@@ -185,16 +187,19 @@ class AppContext:
     # ════════════════════════════════════════════════════════════════
 
     def _get_active_input_dir(self):
-        if not self.project_root or not self.current_participant: return None
+        if not self.project_root or not self.current_participant:
+            return None
         return os.path.join(self.project_root, "participants", self.current_participant, "input")
 
     def _get_active_output_dir(self):
-        if not self.project_root or not self.current_participant: return None
+        if not self.project_root or not self.current_participant:
+            return None
         return os.path.join(self.project_root, "participants", self.current_participant, "output")
 
     def _find_file(self, folder, extensions_or_suffix, exclude=None):
         """Helper to find files in the active folders."""
-        if not folder or not os.path.exists(folder): return None
+        if not folder or not os.path.exists(folder):
+            return None
         
         candidates = []
         for f in os.listdir(folder):
@@ -207,9 +212,11 @@ class AppContext:
             # Check match (extension tuple OR suffix string)
             is_match = False
             if isinstance(extensions_or_suffix, tuple):
-                if f_lower.endswith(extensions_or_suffix): is_match = True
+                if f_lower.endswith(extensions_or_suffix):
+                    is_match = True
             elif isinstance(extensions_or_suffix, str):
-                if f_lower.endswith(extensions_or_suffix): is_match = True
+                if f_lower.endswith(extensions_or_suffix):
+                    is_match = True
                 
             if is_match:
                 candidates.append(os.path.join(folder, f))
@@ -241,7 +248,8 @@ class AppContext:
     def pose_data_path(self):
         # Prioritize Output folder, fallback to Input (if imported manually)
         out_f = self._find_file(self._get_active_output_dir(), '_yolo.json.gz')
-        if out_f: return out_f
+        if out_f:
+            return out_f
         return self._find_file(self._get_active_input_dir(), '_yolo.json.gz')
 
     @pose_data_path.setter
@@ -260,7 +268,8 @@ class AppContext:
     def toi_path(self):
         # Look for generated _tois.tsv first
         out_f = self._find_file(self._get_active_output_dir(), '_tois.tsv')
-        if out_f: return out_f
+        if out_f:
+            return out_f
         # Fallback to any .tsv/.txt in input
         return self._find_file(self._get_active_input_dir(), ('.tsv', '.txt'))
 
@@ -272,7 +281,8 @@ class AppContext:
     def aoi_csv_path(self):
         # Finds a CSV that is NOT "mapped" or "results" or "final"
         folder = self._get_active_output_dir()
-        if not folder: return None
+        if not folder:
+            return None
         for f in os.listdir(folder):
             lower = f.lower()
             if lower.endswith('.csv') and 'mapped' not in lower and 'results' not in lower and 'stats' not in lower:
@@ -311,9 +321,11 @@ class AppContext:
         """
         Copies a file into the specific participant's INPUT folder.
         """
-        if not self.project_root: return None
+        if not self.project_root:
+            return None
         dest_dir = os.path.join(self.project_root, "participants", pid, "input")
-        if not os.path.exists(dest_dir): return None
+        if not os.path.exists(dest_dir):
+            return None
         
         filename = os.path.basename(source_path)
         dest_path = os.path.join(dest_dir, filename)

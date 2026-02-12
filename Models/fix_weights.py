@@ -1,5 +1,4 @@
 import torch
-import copy
 
 def convert_torchreid_to_ultralytics(source_path, dest_path=None):
     if dest_path is None:
