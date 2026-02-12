@@ -242,6 +242,9 @@ class HermesUnifiedApp:
             self._show_error(f"Failed to load module {mod_name}:\n{ViewClass}")
             return
 
+        # Reset protocol to default to avoid stale handlers from previous views
+        self.root.protocol("WM_DELETE_WINDOW", self.root.destroy)
+
         # Clear Content
         for w in self.content_area.winfo_children(): w.destroy()
         

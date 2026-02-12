@@ -429,7 +429,8 @@ class IdentityView:
         self._check_for_autosave()
         self._start_autosave_loop()
         
-        self.parent.winfo_toplevel().protocol("WM_DELETE_WINDOW", self._on_close)
+        self._toplevel = self.parent.winfo_toplevel()
+        self._toplevel.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _setup_ui(self) -> None:
         tk.Label(self.parent, text="2. Identity Assignment", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 10), anchor="w")
@@ -795,7 +796,10 @@ class IdentityView:
         if os.path.exists(path):
             try: os.remove(path)
             except: pass
-        self.parent.winfo_toplevel().destroy()
+        try:
+            self._toplevel.destroy()
+        except (tk.TclError, AttributeError):
+            pass
 
     def open_settings_dialog(self) -> None:
         """Opens a popup window to modify hardcoded parameters."""

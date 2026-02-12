@@ -51,9 +51,13 @@ class StatsLogic:
             
             # Init colonne
             df_gaze['Phase'] = 'None'
+            df_gaze['Phase'] = df_gaze['Phase'].astype(object)
             df_gaze['Condition'] = 'None'
+            df_gaze['Condition'] = df_gaze['Condition'].astype(object)
+            
             if 'Trial' in df_toi.columns:
-                df_gaze['Trial'] = pd.NA
+                df_gaze['Trial'] = np.nan
+                df_gaze['Trial'] = df_gaze['Trial'].astype(object)
             
             # Numpy array per ricerca veloce
             gaze_ts = df_gaze['Timestamp'].to_numpy(dtype=np.float64)
@@ -75,8 +79,10 @@ class StatsLogic:
                     # Cast a int per soddisfare il type checker (get_loc può ritornare slice/array)
                     col_phase = int(df_gaze.columns.get_loc('Phase')) # type: ignore
                     col_cond = int(df_gaze.columns.get_loc('Condition')) # type: ignore
-                    df_gaze.iloc[idx_start:idx_end, col_phase] = row['Phase']
-                    df_gaze.iloc[idx_start:idx_end, col_cond] = row['Condition']
+                    
+                    # Cast to string to ensure compatibility if Phase/Condition are numeric in TOI
+                    df_gaze.iloc[idx_start:idx_end, col_phase] = str(row['Phase'])
+                    df_gaze.iloc[idx_start:idx_end, col_cond] = str(row['Condition'])
                     if 'Trial' in df_toi.columns:
                         col_trial = int(df_gaze.columns.get_loc('Trial')) # type: ignore
                         df_gaze.iloc[idx_start:idx_end, col_trial] = row['Trial']
