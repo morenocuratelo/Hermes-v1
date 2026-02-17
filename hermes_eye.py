@@ -37,7 +37,9 @@ class GazeLogic:
         id_col_name : str
             The name of the identity column found ('ID' or 'TrackID').
         """
-        df = pd.read_csv(csv_path) #DataFrame, similar to a table, with columns and rows. Each column has a name and a type, e.g. 'Frame' (int), 'x1' (float), 'Role' (str), etc.
+        # DataFrame, similar to a table, with columns and rows. 
+        # Each column has a name and a type, e.g. 'Frame' (int), 'x1' (float), 'Role' (str), etc.
+        df = pd.read_csv(csv_path)
         # Flexible ID column detection
         if 'ID' in df.columns:
             id_col_name = 'ID'
@@ -59,8 +61,9 @@ class GazeLogic:
         
         aoi_lookup: dict[int, list[dict]] = {}
         for frame, group in df.groupby('Frame'):
+            # aoi_lookup is a dict where the keys are frame numbers (int) and the values are lists of dicts.
+            # Each dict represents an AOI in that frame with its properties (x1, y1, x2, y2, Role, AOI, ID/TrackID, etc.)
             aoi_lookup[int(frame)] = group.to_dict('records')  # type: ignore[arg-type]
-            #aoi_lookup is a dict where the keys are frame numbers (int) and the values are lists of dicts, each dict representing an AOI in that frame with its properties (x1, y1, x2, y2, Role, AOI, ID/TrackID, etc.)
         return aoi_lookup, id_col_name
 
     # ── Hit-Testing ─────────────────────────────────────────────
@@ -69,34 +72,38 @@ class GazeLogic:
     def calculate_hit(gaze_x: float, gaze_y: float,
                       aois_in_frame: list[dict],
                       id_col_name: str) -> dict | None:
-            #It takes the gaze coordinates (x, y), the list of all AOIs present in the current frame, and the name of the column used for IDs (e.g., "TrackID").
-            #It returns a dictionary (the winning AOI) or None if the user is looking at nothing/background. (see below for the logic)
         """
         Follows a pure geometric hit-test.
-
-        Returns the AOI with the smallest area that contains the gaze
-        point, or *None* if no AOI is hit.
+        Returns the AOI with the smallest area that contains the gaze point, or None if no AOI is hit.
         """
+        # It takes the gaze coordinates (x, y), the list of all AOIs present in the current frame, 
+        # and the name of the column used for IDs (e.g., "TrackID").
+        # It returns a dictionary (the winning AOI) or None if the user is looking at nothing/background.
+
         hits = []
-        for aoi in aois_in_frame:
         # It iterates through every potential target in the frame (e.g., Person A's Hand, Person B's Head).
-            x1, y1, x2, y2 = aoi['x1'], aoi['y1'], aoi['x2'], aoi['y2']
+        for aoi in aois_in_frame:
             # And extracts the coordinates of the bounding box.
+            x1, y1, x2, y2 = aoi['x1'], aoi['y1'], aoi['x2'], aoi['y2']
+            
+            # If the gaze point is within the bounding box, it calculates the area of the AOI (width * height) 
+            # and adds it to a list of hits.
             if x1 <= gaze_x <= x2 and y1 <= gaze_y <= y2:
-                # If the gaze point is within the bounding box, it calculates the area of the AOI (width * height) and adds it to a list of hits.
                 area = (x2 - x1) * (y2 - y1)
+                
+                # The dictionary for each hit contains the role (e.g., "Hand"), the AOI name (e.g., "Person A Hand"), 
+                # the track ID, and the area of the AOI.
                 hits.append({
                     "role": aoi['Role'],
                     "aoi":  aoi['AOI'],
                     "tid":  aoi[id_col_name],
                     "area": area,
-                # The dictionary for each hit contains the role (e.g., "Hand"), the AOI name (e.g., "Person A Hand"), the track ID, and the area of the AOI.
-                # If it is a hit, it doesn't return immediately. Instead, it calculates the area of the box and adds the relevant info (Role, AOI name, ID) to a list of candidates (hits).
                 })
 
+        # If the loop finishes and the list is empty, the user was looking at the background. 
+        # In this case, the function returns None.
         if not hits:
             return None
-            #If the loop finishes and the list is empty, the user was looking at the background. In this case, the function returns None.
         return min(hits, key=lambda h: h['area'])
 
     # ── Coordinate Conversion ───────────────────────────────────
@@ -111,8 +118,10 @@ class GazeLogic:
     def timestamp_to_frame(timestamp: float, offset: float,
                            fps: float) -> int:
         """Convert a gaze timestamp (seconds) to a frame index."""
+        # The timestamp_to_frame function takes a gaze timestamp (in seconds), applies the synchronization offset 
+        # (also in seconds), and multiplies by the frame rate (frames per second) to get the corresponding frame index.
+        # The offset allows for correcting any temporal misalignment between the gaze data and the video.
         return int((timestamp - offset) * fps)
-        # The timestamp_to_frame function takes a gaze timestamp (in seconds), applies the synchronization offset (also in seconds), and multiplies by the frame rate (frames per second) to get the corresponding frame index in the video. The offset allows for correcting any temporal misalignment between the gaze data and the video, such as if the gaze recording started a few seconds after the video or vice versa. By adjusting the timestamp with the offset before converting to frames, we can ensure that the gaze points are mapped to the correct frames in the video timeline.
 
     # ── Main Mapping Pipeline ───────────────────────────────────
     
@@ -131,56 +140,70 @@ class GazeLogic:
         # 1. Load & index AOI
         if progress_callback:
             progress_callback("Loading AOI into memory...")
+        
+        # The load_aoi_data function reads the AOI CSV file and organizes the AOI information into a dictionary.
+        # It also detects which column in the CSV contains the unique identifier for each AOI.
         aoi_lookup, id_col_name = self.load_aoi_data(aoi_path)
+        
         if progress_callback:
             progress_callback(f"AOI indexed ({len(aoi_lookup)} frames). Streaming gaze…")
-        # The load_aoi_data function reads the AOI CSV file and organizes the AOI information into a dictionary (aoi_lookup) where each key is a frame index and the value is a list of AOIs present in that frame. It also detects which column in the CSV contains the unique identifier for each AOI (either "ID" or "TrackID"). This allows for efficient retrieval of AOIs when processing gaze data, as we can quickly look up which AOIs are relevant for any given frame index derived from the gaze timestamps.
 
         # 2. Stream gaze data (RESTO DEL BLOCCO RIMANE UGUALE FINO AL SALVATAGGIO)
         output_rows: list[dict] = []
 
+        # With the gazedata.gz file open, it reads it line by line. 
+        # (Instead of loading the whole file in memory, it reads line by line).
         with gzip.open(gaze_path, 'rt', encoding='utf-8') as f:
-        #With the gazedata.gz file open, it reads it line by line. (Instead of loading the whole file in memory, it reads line by line). Each line is expected to be a JSON string representing a gaze data point, which includes a timestamp and normalized gaze coordinates (gaze2d). For each gaze point, it performs the following steps:
             for line in f:
                 if self._cancel_flag:
                     raise InterruptedError("Mapping cancelled by user.")
+                
+                # The line read from the file is just a text string (e.g., '{"timestamp": 123, ...}'). 
+                # This function converts that string into a real Python dictionary.
                 try:
                     gaze_pkg = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                # The line read from the file is just a text string (e.g., '{"timestamp": 123, ...}'). This function converts that string into a real Python dictionary so we can access data like gaze_pkg['timestamp'].
 
+                # "Does this packet actually contain data? And specifically, does it contain 2D gaze coordinates?" 
+                # If not, skip it. This check is to avoid "Syncport" beacons or non-gaze data.
                 if 'data' not in gaze_pkg or 'gaze2d' not in gaze_pkg['data']:
                     continue
-                #"Does this packet actually contain data? And specifically, does it contain 2D gaze coordinates?" If not, skip it. This check is to avoid "Syncport" beacons or any other non-gaze data that might be present in the file.
 
+                # The timestamp is extracted from the gaze package.
                 ts = gaze_pkg.get('timestamp', 0)
-                # The timestamp is extracted from the gaze package. This timestamp represents the time at which the gaze data was recorded, and it will be used to determine which video frame it corresponds to after applying the synchronization offset.
+                
+                # The normalized gaze coordinates (gaze2d) are extracted. 
+                # These are typically in the range [0.0, 1.0].
                 g2d = gaze_pkg['data']['gaze2d']
                 if not g2d:
                     continue
-                # The normalized gaze coordinates (gaze2d) are extracted. These are typically in the range [0.0, 1.0] and represent the position of the gaze on the screen as a percentage of the width and height. If gaze2d is empty or not present, it skips this data point.
 
+                # The normalized gaze coordinates are unpacked into gx and gy for easier access.
                 gx, gy = g2d[0], g2d[1]
-                # The normalized gaze coordinates are unpacked into gx and gy for easier access. These represent the horizontal and vertical gaze positions, respectively, as normalized values.
+                
+                # The timestamp is converted to a frame index using the timestamp_to_frame function.
                 frame_idx = self.timestamp_to_frame(ts, offset, fps)
+                
+                # If the resulting frame index is negative, it means the gaze point occurs before the start of the video.
                 if frame_idx < 0:
                     continue
-                # The timestamp is converted to a frame index using the timestamp_to_frame function, which applies the synchronization offset and frame rate to determine which video frame this gaze point corresponds to (see above). If the resulting frame index is negative, it means the gaze point occurs before the start of the video (after applying offset), so it skips this data point.
 
                 px, py = self.normalised_to_pixel(gx, gy, W, H)
                 # The normalized gaze coordinates (gx, gy) are converted to pixel coordinates (px, py) using the normalised_to_pixel function. This function multiplies the normalized values by the video resolution (width and height) to get the actual pixel position of the gaze on the video frame.
 
                 # Hit-test
+                # For the current frame index, it retrieves the list of active AOIs from the aoi_lookup dictionary.
                 active_aois = aoi_lookup.get(frame_idx, [])
-                # For the current frame index, it retrieves the list of active AOIs from the aoi_lookup dictionary. If there are no AOIs for that frame, it defaults to an empty list.
+                
+                # The calculate_hit function is called to determine if the gaze point (px, py) hits any of the active AOIs in the current frame. 
+                # It checks if the gaze point is within the bounding box of each AOI and returns the one with the smallest area that contains the gaze point. 
                 best = self.calculate_hit(px, py, active_aois, id_col_name)
 
                 if best:
                     hit_role, hit_aoi, hit_tid = best['role'], best['aoi'], best['tid']
                 else:
                     hit_role, hit_aoi, hit_tid = "None", "None", -1
-                # The calculate_hit function is called to determine if the gaze point (px, py) hits any of the active AOIs in the current frame. It checks if the gaze point is within the bounding box of each AOI and returns the one with the smallest area that contains the gaze point. If no AOI is hit, it returns None.
 
 
                 output_rows.append({
