@@ -26,7 +26,7 @@ CONF_THRESHOLD = 0.6 # Manteniamo alto per purezza, come suggerito nel paper BoT
 IOU_THRESHOLD = 1.0 # CRITICO: YOLO26 è NMS-Free. Qualsiasi post-processing NMS è ridondante.
 MATCH_THRESHOLD = 0.8 # Standard BoT-SORT
 RANDOM_SEED = 42
-ULTRALYTICS_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/"
+ULTRALYTICS_URL = "https://github.com/ultralytics/assets/releases/download/v8.4.0/"
 TRACKERS_CONFIG_DIR = os.path.join("Configs", "Trackers")
 # Sebbene questi valori siano stati scelti come default basati sulla letteratura (COCO benchmarks), 
 # il nostro strumento espone esplicitamente questi parametri all'utente tramite GUI, 

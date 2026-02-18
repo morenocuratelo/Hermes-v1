@@ -91,14 +91,18 @@ class ProjectWizard:
             self.context.create_project(parent_dir, name)
             # Aggiunge subito un partecipante di default
             if messagebox.askyesno("Setup", "Create first participant now?"):
-                pid = simpledialog.askstring("Participant", "ID (e.g. P001):", initialvalue="P001")
-                if pid:
-                    self.context.add_participant(pid)
-            
-            self.win.destroy()
-            self.on_complete()
+                self.win.withdraw() # Nasconde la finestra progetto mentre si usa il wizard partecipante
+                ParticipantWizard(self.root, self.context, self._on_participant_created)
+            else:
+                self.win.destroy()
+                self.on_complete()
         except Exception as e:
             messagebox.showerror("Error", str(e))
+            self.win.deiconify()
+
+    def _on_participant_created(self, pid):
+        self.win.destroy()
+        self.on_complete()
 
     def open_project(self):
         path = filedialog.askdirectory(title="Select Project Folder")

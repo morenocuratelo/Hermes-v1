@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-set "VENV_PY=venv\Scripts\python.exe"
+set "VENV_PY=.venv\Scripts\python.exe"
 
 if not exist "%VENV_PY%" (
     echo [HERMES] Ambiente virtuale non trovato.

@@ -108,6 +108,23 @@ class AppContext:
         os.makedirs(os.path.join(self.project_root, "assets", "profiles_toi"), exist_ok=True)
         os.makedirs(os.path.join(self.project_root, "participants"), exist_ok=True)
         
+        # --- AUTO-IMPORT MODELS ---
+        # Copia i modelli _ready dalla cartella dell'applicazione al nuovo progetto
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        src_models_dir = os.path.join(app_dir, "Models")
+        dst_models_dir = os.path.join(self.project_root, "assets", "models")
+        
+        if os.path.exists(src_models_dir):
+            models_to_copy = ["resnet50_msmt17_ready.pt", "osnet_ain_x1_0_ready.pt"]
+            for m in models_to_copy:
+                src = os.path.join(src_models_dir, m)
+                if os.path.exists(src):
+                    try:
+                        shutil.copy2(src, os.path.join(dst_models_dir, m))
+                        print(f"PROJECT: Imported model {m}")
+                    except Exception as e:
+                        print(f"PROJECT: Failed to import {m}: {e}")
+
         # Initial Config
         self.project_config = {
             "name": name,
@@ -379,6 +396,23 @@ class AppContext:
         if not self.project_root:
             return None
         dest_dir = os.path.join(self.project_root, "participants", pid, "input")
+        if not os.path.exists(dest_dir):
+            return None
+        
+        filename = rename_to if rename_to else os.path.basename(source_path)
+        dest_path = os.path.join(dest_dir, filename)
+        
+        try:
+            # If same path, skip
+            if os.path.abspath(source_path) == os.path.abspath(dest_path):
+                return dest_path
+                
+            shutil.copy2(source_path, dest_path)
+            print(f"IMPORT: {filename} -> {pid}/input")
+            return dest_path
+        except Exception as e:
+            print(f"IMPORT ERROR: {e}")
+            return None
         if not os.path.exists(dest_dir):
             return None
         

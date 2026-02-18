@@ -55,20 +55,20 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-if exist "venv" (
+if exist ".venv" (
     echo [HERMES] Rimozione ambiente virtuale precedente...
-    rmdir /s /q venv
+    rmdir /s /q .venv
 )
 
 echo [HERMES] Creazione ambiente virtuale con Python %PYTHON_VERSION%...
-"%UV_CMD%" venv --python %PYTHON_VERSION% --seed venv
+"%UV_CMD%" venv --python %PYTHON_VERSION% --seed .venv
 if %errorlevel% neq 0 (
     echo ERRORE: Impossibile creare l'ambiente virtuale con Python %PYTHON_VERSION%.
     pause
     exit /b 1
 )
 
-set "VENV_PY=venv\Scripts\python.exe"
+set "VENV_PY=.venv\Scripts\python.exe"
 if not exist "%VENV_PY%" (
     echo ERRORE: Python del venv non trovato in %VENV_PY%.
     pause
