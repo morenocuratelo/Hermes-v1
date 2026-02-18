@@ -14,6 +14,7 @@ import random
 import numpy as np
 import requests
 import csv
+import datetime
 from ultralytics import YOLO  # type: ignore
 
 # --- RESEARCH PARAMETERS & HEURISTICS (CONSTANTS) ---
@@ -27,7 +28,10 @@ MATCH_THRESHOLD = 0.8 # Standard BoT-SORT
 RANDOM_SEED = 42
 ULTRALYTICS_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/"
 TRACKERS_CONFIG_DIR = os.path.join("Configs", "Trackers")
-# Sebbene questi valori siano stati scelti come default basati sulla letteratura (COCO benchmarks), il nostro strumento espone esplicitamente questi parametri all'utente tramite GUI, permettendo una regolazione fine (fine-tuning) specifica per le condizioni di illuminazione e densità della scena analizzata, superando i limiti di un approccio 'one-size-fits-all'.
+# Sebbene questi valori siano stati scelti come default basati sulla letteratura (COCO benchmarks), 
+# il nostro strumento espone esplicitamente questi parametri all'utente tramite GUI, 
+# permettendo una regolazione fine (fine-tuning) specifica per le condizioni di illuminazione e densità 
+# della scena analizzata, superando i limiti di un approccio 'one-size-fits-all'.
 
 
 # ==========================================================================================
@@ -171,7 +175,7 @@ class PoseEstimatorLogic:
                 on_log(f"⚠️ CSV Export error: {e}")
             return False
 
-# La funzione run_analysis è il cuore del processo, orchestrando l'intero flusso di lavoro dall'inizio alla fine. Gestisce il controllo dei modelli (scaricando quelli mancanti), la generazione dinamica della configurazione del tracker in base ai parametri dell'utente, l'esecuzione dell'inferenza con YOLO (con o senza tracking), e infine la scrittura dei risultati in un file JSON compresso. Durante tutto il processo, fornisce feedback in tempo reale tramite callback per log e progress bar, garantendo un'esperienza utente informativa e reattiva.
+# Run_analysis function is the core method that orchestrates the entire process of human pose estimation and tracking. It performs the following steps:
     def run_analysis(self, config, on_progress=None, on_log=None):
         """
         Main execution method.
@@ -187,7 +191,7 @@ class PoseEstimatorLogic:
         if on_log:
             on_log("--- Analysis Started ---")
         
-        # 1. ReID Model Check
+        # 1. ReID Model Check (BoT-SORT specific ReIdentification model)
         reid_path = None
         if tracker_params.get('with_reid') and tracker_params.get('tracker_type') == 'botsort':
             reid_name = tracker_params.get('reid_model_name', "resnet50_msmt17_ready.pt")
@@ -211,7 +215,7 @@ class PoseEstimatorLogic:
         if on_log:
             on_log(f"✅ Tracker configuration generated: {tracker_config_file}")
 
-        # 3. Determinism
+        # 3. Seed
         if on_log:
             on_log(f"Reproducibility seed: {RANDOM_SEED}")
         self.set_determinism(RANDOM_SEED)
@@ -245,11 +249,11 @@ class PoseEstimatorLogic:
         
         yolo_args = {
             "source": video_file,
-            "stream": True,
-            "verbose": False,
-            "conf": tracker_params['conf'],
-            "iou": tracker_params['iou'],
-            "device": 0 if device == "cuda" else "cpu"
+            "stream": True, # Frame-by-frame streaming per gestione memoria e progress bar
+            "verbose": False, # Deactivate logging from YOLO to keep our custom log clean
+            "conf": tracker_params['conf'], # Confidence threshold for detections
+            "iou": tracker_params['iou'], # IoU threshold for NMS (ignored in YOLO26, but required for older versions)
+            "device": 0 if device == "cuda" else "cpu" # NVIDIA GPU se disponibile, altrimenti CPU
         }
         
         if is_tracker_enabled:
@@ -266,12 +270,12 @@ class PoseEstimatorLogic:
                 # Normalize to numpy (handles CPU/GPU and Tensor/ndarray differences)
                 result = result.cpu().numpy()
 
-                boxes = result.boxes.xyxy if result.boxes else np.array([])
-                ids = result.boxes.id if result.boxes and result.boxes.id is not None else np.array([])
-                confs = result.boxes.conf if result.boxes else np.array([])
-                keypoints = result.keypoints.data if result.keypoints else np.array([])
+                boxes = result.boxes.xyxy if result.boxes else np.array([]) # Bounding box coordinates in [x1, y1, x2, y2] format (two-points coordinates)
+                ids = result.boxes.id if result.boxes and result.boxes.id is not None else np.array([]) # Track IDs assegnati dal tracker (se abilitato), altrimenti -1 per indicare nessun tracking
+                confs = result.boxes.conf if result.boxes else np.array([]) # Confidence score per ogni rilevazione, utile per filtrare ulteriormente o analizzare la qualità delle rilevazioni
+                keypoints = result.keypoints.data if result.keypoints else np.array([]) # Coordinate dei keypoints in formato [x, y, conf] per ciascuno dei 17 punti chiave standard (se disponibili), altrimenti array vuoto
 
-                det_list = []
+                det_list = [] # Lista di rilevazioni per il frame corrente, dove ogni rilevazione è un dizionario contenente track_id, box, conf e keypoints. Questa struttura consente di serializzare facilmente i dati in JSON e mantenere una chiara organizzazione delle informazioni per ogni persona rilevata in ciascun frame.
                 for j in range(len(boxes)):
                     track_id = int(ids[j]) if len(ids) > 0 else -1
                     b = boxes[j].tolist()
@@ -299,6 +303,24 @@ class PoseEstimatorLogic:
         if on_log:
             on_log("✅ YOLO analysis complete. JSON output saved.")
         
+        # Save Metadata (Parameters)
+        try:
+            meta_path = out_file.replace(".json.gz", "_meta.json")
+            metadata = {
+                "timestamp": datetime.datetime.now().isoformat(),
+                "video_path": video_file,
+                "model_name": model_name,
+                "tracker_params": tracker_params,
+                "device": device
+            }
+            with open(meta_path, 'w', encoding='utf-8') as f_meta:
+                json.dump(metadata, f_meta, indent=4)
+            if on_log:
+                on_log(f"📄 Parameters saved to: {os.path.basename(meta_path)}")
+        except Exception as e:
+            if on_log:
+                on_log(f"⚠️ Error saving metadata: {e}")
+
         # 8. CSV Export
         self.export_to_csv_flat(out_file, on_log)
         
