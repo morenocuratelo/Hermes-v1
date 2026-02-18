@@ -1,254 +1,387 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 import cv2
 import pandas as pd
 import bisect
 import os
+import math
 from PIL import Image, ImageTk
 
 class TimelineWidget(tk.Canvas):
-    """Barra temporale che mostra i TOI colorati."""
+    """Timeline visualization for TOIs."""
     def __init__(self, parent, command_seek, **kwargs):
         super().__init__(parent, **kwargs)
         self.command_seek = command_seek
-        self.duration = 0
+        self.duration = 0.0
         self.tois = []
         self.cursor_x = 0
         self.bind("<Button-1>", self.on_click)
+        self.bind("<B1-Motion>", self.on_drag)
+        self.bind("<Configure>", lambda e: self.redraw())
 
     def set_data(self, duration, df_tois):
-        self.duration = duration
+        self.duration = float(duration)
         self.tois = []
         if df_tois is not None and not df_tois.empty:
-            # Colori ciclici per le condizioni
-            colors = ['#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99', '#e31a1c']
+            # Cyclic colors
+            colors = ['#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99', '#e31a1c', '#fdbf6f', '#ff7f00']
             cond_map = {}
             for _, row in df_tois.iterrows():
-                cond = str(row.get('Condition', 'Base'))
+                cond = str(row.get('Condition', row.get('Phase', 'Base')))
                 if cond not in cond_map:
                     cond_map[cond] = colors[len(cond_map) % len(colors)]
-                self.tois.append({
-                    's': row['Start'], 'e': row['End'], 
-                    'c': cond_map[cond], 'n': row['Name']
-                })
+                
+                try:
+                    s = float(row['Start'])
+                    e = float(row['End'])
+                    name = str(row.get('Name', ''))
+                    self.tois.append({'s': s, 'e': e, 'c': cond_map[cond], 'n': name})
+                except ValueError:
+                    continue
         self.redraw()
 
     def redraw(self):
         self.delete("all")
         w, h = self.winfo_width(), self.winfo_height()
-        if self.duration <= 0:
+        if self.duration <= 0 or w <= 1:
             return
         
-        # Disegna blocchi TOI
+        # Draw TOI blocks
         for t in self.tois:
             x1 = (t['s'] / self.duration) * w
             x2 = (t['e'] / self.duration) * w
-            self.create_rectangle(x1, 2, x2, h-2, fill=t['c'], outline="gray")
+            if x2 > x1:
+                self.create_rectangle(x1, 2, x2, h-2, fill=t['c'], outline="gray", tags="toi")
         
-        # Cursore
-        self.create_line(self.cursor_x, 0, self.cursor_x, h, fill="red", width=2)
+        # Draw Cursor
+        self.create_line(self.cursor_x, 0, self.cursor_x, h, fill="red", width=2, tags="cursor")
 
     def update_cursor(self, current_sec):
         if self.duration > 0:
             w = self.winfo_width()
             self.cursor_x = (current_sec / self.duration) * w
-            self.redraw() # Ridisegna per muovere il cursore (ottimizzabile)
+            self.coords("cursor", self.cursor_x, 0, self.cursor_x, self.winfo_height())
 
     def on_click(self, event):
+        self._seek_event(event)
+
+    def on_drag(self, event):
+        self._seek_event(event)
+
+    def _seek_event(self, event):
         if self.duration > 0:
-            perc = event.x / self.winfo_width()
+            w = self.winfo_width()
+            perc = max(0.0, min(1.0, event.x / w))
             sec = perc * self.duration
             self.command_seek(sec)
 
 class ReviewerView:
     def __init__(self, parent, context=None):
         self.parent = parent
-        self.context = context # Usa il context per caricare i percorsi automaticamente
+        self.context = context
         
+        # Data State
         self.cap = None
         self.df_gaze = None
         self.df_tois = None
+        
         self.fps = 30.0
-        self.total_duration = 0
+        self.total_duration = 0.0
+        self.total_frames = 0
         self.is_playing = False
+        self.current_frame = 0
+        
+        # Gaze Data Cache
+        self.gaze_t = []
+        self.gaze_x = []
+        self.gaze_y = []
+        
+        # UI Variables
+        self.video_path_var = tk.StringVar()
+        self.toi_path_var = tk.StringVar()
+        self.gaze_path_var = tk.StringVar()
+        self.status_var = tk.StringVar(value="Ready.")
         
         self._setup_ui()
         
-        # Auto-load se lanciato da Hermes
         if self.context:
-            self.auto_load()
+            self._auto_load_from_context()
 
     def _setup_ui(self):
-        tk.Label(self.parent, text="5. Data Reviewer", font=("Arial", 16, "bold")).pack(pady=5)
+        # Main Layout: PanedWindow
+        self.paned = tk.PanedWindow(self.parent, orient=tk.HORIZONTAL)
+        self.paned.pack(fill=tk.BOTH, expand=True)
         
-        # Controlli File
-        fr_files = tk.LabelFrame(self.parent, text="Load Data")
-        fr_files.pack(fill=tk.X, padx=5)
-        btn_fr = tk.Frame(fr_files)
-        btn_fr.pack(fill=tk.X)
-        tk.Button(btn_fr, text="Video", command=self.load_video).pack(side=tk.LEFT)
-        tk.Button(btn_fr, text="TOI (.tsv)", command=self.load_tois).pack(side=tk.LEFT)
-        tk.Button(btn_fr, text="Gaze (.csv)", command=self.load_gaze).pack(side=tk.LEFT)
+        # --- LEFT PANEL: Player ---
+        self.f_player = ttk.Frame(self.paned)
+        self.paned.add(self.f_player, minsize=600, stretch="always")
         
-        # Video
-        self.lbl_vid = tk.Label(self.parent, bg="black")
-        self.lbl_vid.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Controls Area (Pack FIRST to ensure visibility at bottom)
+        f_ctrl = ttk.Frame(self.f_player, padding=5)
+        f_ctrl.pack(fill=tk.X, side=tk.BOTTOM)
         
         # Timeline
-        self.timeline = TimelineWidget(self.parent, command_seek=self.seek, height=40, bg="#eee")
-        self.timeline.pack(fill=tk.X, padx=5)
+        self.timeline = TimelineWidget(f_ctrl, command_seek=self.seek_seconds, height=30, bg="#e0e0e0")
+        self.timeline.pack(fill=tk.X, pady=(0, 5))
         
-        # Controlli Play
-        ctrl = tk.Frame(self.parent)
-        ctrl.pack(pady=5)
-        tk.Button(ctrl, text="Play/Pause", command=self.toggle_play, width=15, bg="#cfc").pack()
+        # Transport Buttons
+        f_btns = ttk.Frame(f_ctrl)
+        f_btns.pack(fill=tk.X)
         
-        self.lbl_info = tk.Label(self.parent, text="Ready", fg="gray")
-        self.lbl_info.pack()
+        ttk.Button(f_btns, text="⏮ TOI", command=lambda: self.seek_toi(-1)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(f_btns, text="⏪ -5s", command=lambda: self.seek_relative_sec(-5)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(f_btns, text="⏴ -1f", command=lambda: self.seek_relative_frames(-1)).pack(side=tk.LEFT, padx=2)
+        self.btn_play = ttk.Button(f_btns, text="▶ Play", command=self.toggle_play)
+        self.btn_play.pack(side=tk.LEFT, padx=10)
+        ttk.Button(f_btns, text="+1f ⏵", command=lambda: self.seek_relative_frames(1)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(f_btns, text="+5s ⏩", command=lambda: self.seek_relative_sec(5)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(f_btns, text="TOI ⏭", command=lambda: self.seek_toi(1)).pack(side=tk.LEFT, padx=2)
+        
+        self.lbl_time = ttk.Label(f_btns, text="00:00.00 / 00:00.00", font=("Consolas", 10))
+        self.lbl_time.pack(side=tk.RIGHT)
 
-    def auto_load(self):
-        # Tenta di caricare dai path del context
-        if hasattr(self.context, 'video_path') and self.context.video_path:
-            self.load_video(self.context.video_path)
-        if hasattr(self.context, 'toi_path') and self.context.toi_path:
-            self.load_tois(self.context.toi_path)
-        # Gaze è più difficile, spesso è in output, proviamo a cercarlo
-        if hasattr(self.context, 'paths') and 'output' in self.context.paths:
-            # Cerca un CSV che finisce con _mapped.csv o _results.csv
-            out_dir = self.context.paths['output']
-            for f in os.listdir(out_dir):
-                if f.endswith("gazedata_MAPPED.csv") or f.endswith("gazedata_RESULTS.csv"):
-                    self.load_gaze(os.path.join(out_dir, f))
-                    break
+        # Video Area (Pack LAST to fill remaining space)
+        self.lbl_video = tk.Label(self.f_player, bg="black")
+        self.lbl_video.pack(fill=tk.BOTH, expand=True)
 
-    def load_video(self, path=None):
-        if not path:
-            path = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.avi")])
-        if not path:
+        # --- RIGHT PANEL: Settings & Info ---
+        self.f_sidebar = ttk.Frame(self.paned, padding=10)
+        self.paned.add(self.f_sidebar, minsize=300, stretch="always")
+        
+        ttk.Label(self.f_sidebar, text="7. Data Reviewer", font=("Segoe UI", 16, "bold")).pack(anchor="w", pady=(0, 20))
+        
+        # File Loaders
+        lf_files = ttk.LabelFrame(self.f_sidebar, text="Data Sources", padding=10)
+        lf_files.pack(fill=tk.X, pady=5)
+        
+        self._add_file_picker(lf_files, "Video:", self.video_path_var, self.load_video, "*.mp4 *.avi")
+        self._add_file_picker(lf_files, "TOI (.tsv):", self.toi_path_var, self.load_tois, "*.tsv *.txt *.csv")
+        self._add_file_picker(lf_files, "Gaze Mapped (.csv):", self.gaze_path_var, self.load_gaze, "*.csv")
+        
+        # Info Box
+        lf_info = ttk.LabelFrame(self.f_sidebar, text="Current Frame Info", padding=10)
+        lf_info.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        self.txt_info = tk.Text(lf_info, height=15, width=30, state="disabled", font=("Consolas", 9), bg="#f4f4f4")
+        self.txt_info.pack(fill=tk.BOTH, expand=True)
+
+    def _add_file_picker(self, parent, label, var, callback, filetypes):
+        f = ttk.Frame(parent)
+        f.pack(fill=tk.X, pady=2)
+        ttk.Label(f, text=label).pack(anchor="w")
+        
+        f_in = ttk.Frame(f)
+        f_in.pack(fill=tk.X)
+        ttk.Entry(f_in, textvariable=var).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(f_in, text="📂", width=3, command=lambda: self._browse(var, callback, filetypes)).pack(side=tk.LEFT, padx=(2,0))
+
+    def _browse(self, var, callback, filetypes):
+        path = filedialog.askopenfilename(filetypes=[("Files", filetypes)])
+        if path:
+            var.set(path)
+            callback(path)
+
+    def _auto_load_from_context(self):
+        if not self.context:
             return
+        # Video
+        if self.context.video_path and os.path.exists(self.context.video_path):
+            self.video_path_var.set(self.context.video_path)
+            self.load_video(self.context.video_path)
+            
+        # TOI
+        if self.context.toi_path and os.path.exists(self.context.toi_path):
+            self.toi_path_var.set(self.context.toi_path)
+            self.load_tois(self.context.toi_path)
+            
+        # Gaze (Mapped)
+        if hasattr(self.context, 'mapped_csv_path') and self.context.mapped_csv_path:
+             if os.path.exists(self.context.mapped_csv_path):
+                self.gaze_path_var.set(self.context.mapped_csv_path)
+                self.load_gaze(self.context.mapped_csv_path)
+
+    def load_video(self, path):
+        if not os.path.exists(path): return
         self.cap = cv2.VideoCapture(path)
-        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-        frames = self.cap.get(cv2.CAP_PROP_FRAME_COUNT)
-        self.total_duration = frames / self.fps
+        if not self.cap.isOpened():
+            messagebox.showerror("Error", "Could not open video.")
+            return
+            
+        self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
+        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.total_duration = self.total_frames / self.fps
+        
         self.timeline.set_data(self.total_duration, self.df_tois)
         self.show_frame()
 
-    def load_tois(self, path=None):
-        if not path:
-            path = filedialog.askopenfilename(filetypes=[("TOI", "*.tsv *.csv")])
-        if not path:
-            return
+    def load_tois(self, path):
+        if not os.path.exists(path): return
         try:
-            self.df_tois = pd.read_csv(path, sep='\t' if path.endswith('.tsv') else ',')
+            sep = '\t' if path.endswith('.tsv') or path.endswith('.txt') else ','
+            self.df_tois = pd.read_csv(path, sep=sep)
+            
+            # Sort by Start time for correct navigation
+            if 'Start' in self.df_tois.columns:
+                self.df_tois = self.df_tois.sort_values('Start').reset_index(drop=True)
+                
             if self.cap:
                 self.timeline.set_data(self.total_duration, self.df_tois)
-            messagebox.showinfo("OK", f"Loaded {len(self.df_tois)} TOIs")
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            messagebox.showerror("TOI Error", str(e))
 
-    def load_gaze(self, path=None):
-        if not path:
-            path = filedialog.askopenfilename(filetypes=[("Gaze", "*.csv")])
-        if not path:
-            return
+    def load_gaze(self, path):
+        if not os.path.exists(path): return
         try:
-            # Caricamento ottimizzato: assume colonne Timestamp (sec), GazeX, GazeY
-            # Adatta i nomi delle colonne in base al tuo CSV!
             df = pd.read_csv(path)
+            # Expecting columns from hermes_eye.py: Timestamp, Gaze_X, Gaze_Y, Hit_AOI, Hit_Role
+            req = ['Timestamp', 'Gaze_X', 'Gaze_Y']
+            if not all(c in df.columns for c in req):
+                # Try fallback for raw data
+                if 'gaze2d_x' in df.columns: # Example fallback
+                    df.rename(columns={'gaze2d_x': 'Gaze_X', 'gaze2d_y': 'Gaze_Y', 'timestamp': 'Timestamp'}, inplace=True)
+                else:
+                    raise ValueError(f"Missing columns. Expected {req}")
             
-            # Logica base per trovare le colonne giuste
-            t_col = next((c for c in df.columns if 'time' in c.lower()), None)
-            x_col = next((c for c in df.columns if 'x' in c.lower() and 'gaze' in c.lower()), None)
-            y_col = next((c for c in df.columns if 'y' in c.lower() and 'gaze' in c.lower()), None)
-
-            if t_col and x_col and y_col:
-                self.df_gaze = df[[t_col, x_col, y_col]].sort_values(by=t_col)
-                self.gaze_t = self.df_gaze[t_col].values # Per ricerca veloce
-                self.gaze_x = self.df_gaze[x_col].values
-                self.gaze_y = self.df_gaze[y_col].values
-                messagebox.showinfo("OK", "Gaze loaded successfully")
-            else:
-                messagebox.showwarning("Warning", f"Gaze columns not found in: {df.columns}")
+            self.df_gaze = df.sort_values('Timestamp').reset_index(drop=True)
+            self.gaze_t = self.df_gaze['Timestamp'].values
+            self.gaze_x = self.df_gaze['Gaze_X'].values
+            self.gaze_y = self.df_gaze['Gaze_Y'].values
+            
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            messagebox.showerror("Gaze Error", str(e))
+
+    # --- Playback Logic ---
 
     def toggle_play(self):
         self.is_playing = not self.is_playing
+        self.btn_play.config(text="⏸ Pause" if self.is_playing else "▶ Play")
         if self.is_playing:
-            self.loop()
+            self.play_loop()
 
-    def seek(self, sec):
-        if self.cap:
-            self.cap.set(cv2.CAP_PROP_POS_MSEC, sec * 1000)
-            self.show_frame()
+    def play_loop(self):
+        if not self.is_playing or not self.cap:
+            return
+        
+        self.current_frame += 1
+        if self.current_frame >= self.total_frames:
+            self.is_playing = False
+            self.btn_play.config(text="▶ Play")
+            return
+            
+        self.show_frame()
+        delay = int(1000 / self.fps)
+        self.parent.after(delay, self.play_loop)
 
-    def loop(self):
-        if self.is_playing and self.cap:
-            ret, frame = self.cap.read()
-            if ret:
-                self.process_frame(frame)
-                self.parent.after(int(1000/self.fps), self.loop)
-            else:
-                self.is_playing = False
+    def seek_seconds(self, sec):
+        if not self.cap: return
+        self.current_frame = int(sec * self.fps)
+        self.current_frame = max(0, min(self.total_frames - 1, self.current_frame))
+        self.show_frame()
+
+    def seek_relative_sec(self, delta):
+        self.seek_seconds((self.current_frame / self.fps) + delta)
+
+    def seek_relative_frames(self, delta):
+        if not self.cap: return
+        self.current_frame = max(0, min(self.total_frames - 1, self.current_frame + delta))
+        self.show_frame()
+
+    def seek_toi(self, direction):
+        if self.df_tois is None or self.df_tois.empty:
+            return
+        
+        curr_sec = self.current_frame / self.fps
+        
+        if direction > 0:
+            # Next TOI: Find first TOI starting after current time
+            candidates = self.df_tois[self.df_tois['Start'] > (curr_sec + 0.1)]
+            if not candidates.empty:
+                self.seek_seconds(candidates.iloc[0]['Start'])
+        else:
+            # Prev TOI: Find last TOI starting before current time
+            candidates = self.df_tois[self.df_tois['Start'] < (curr_sec - 0.1)]
+            if not candidates.empty:
+                self.seek_seconds(candidates.iloc[-1]['Start'])
 
     def show_frame(self):
-        if self.cap:
-            ret, frame = self.cap.read()
-            if ret:
-                self.process_frame(frame)
-
-    def process_frame(self, frame):
-        # 1. Info Tempo
-        curr_sec = self.cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+        if not self.cap: return
+        
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
+        ret, frame = self.cap.read()
+        if not ret: return
+        
+        curr_sec = self.current_frame / self.fps
         self.timeline.update_cursor(curr_sec)
+        self.lbl_time.config(text=f"{self._fmt_time(curr_sec)} / {self._fmt_time(self.total_duration)}")
         
-        h, w, _ = frame.shape
+        # Overlays
+        info_lines = [f"Time: {curr_sec:.3f}s", f"Frame: {self.current_frame}"]
         
-        # 2. Disegna TOI corrente
-        toi_txt = ""
+        # 1. TOI Info
+        active_toi = "None"
         if self.df_tois is not None:
-            # Cerca se siamo dentro un TOI
             matches = self.df_tois[(self.df_tois['Start'] <= curr_sec) & (self.df_tois['End'] >= curr_sec)]
             if not matches.empty:
-                toi_txt = matches.iloc[0]['Name']
-                cv2.putText(frame, toi_txt, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                r = matches.iloc[0]
+                active_toi = r.get('Name', 'TOI')
+                cond = r.get('Condition', '')
+                phase = r.get('Phase', '')
+                info_lines.append(f"TOI: {active_toi}")
+                info_lines.append(f"Cond: {cond}")
+                info_lines.append(f"Phase: {phase}")
+                
+                # Draw on video
+                cv2.putText(frame, f"{active_toi} ({cond})", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-        # 3. Disegna Gaze (Interpolazione base o Nearest)
+        # 2. Gaze Info
         if self.df_gaze is not None:
-            # Trova l'indice del timestamp più vicino
             idx = bisect.bisect_left(self.gaze_t, curr_sec)
             if idx < len(self.gaze_t):
-                # Se il dato è entro 100ms dal frame video, disegnalo
-                if abs(self.gaze_t[idx] - curr_sec) < 0.1:
-                    gx, gy = self.gaze_x[idx], self.gaze_y[idx]
-                    # Scala se normalizzato (0-1)
-                    if gx <= 1.1 and gy <= 1.1: 
-                        gx, gy = int(gx * w), int(gy * h)
-                    else:
-                        gx, gy = int(gx), int(gy)
+                # Check if sample is close enough (e.g. within 1 frame duration)
+                sample_t = self.gaze_t[idx]
+                if abs(sample_t - curr_sec) < (1.0 / self.fps):
+                    gx, gy = int(self.gaze_x[idx]), int(self.gaze_y[idx])
                     
-                    cv2.circle(frame, (gx, gy), 15, (0, 0, 255), 2) # Cerchio Rosso
-                    cv2.line(frame, (gx-10, gy), (gx+10, gy), (0,0,255), 2)
-                    cv2.line(frame, (gx, gy-10), (gx, gy+10), (0,0,255), 2)
+                    # Draw Crosshair
+                    cv2.circle(frame, (gx, gy), 10, (0, 0, 255), 2)
+                    cv2.line(frame, (gx-15, gy), (gx+15, gy), (0, 0, 255), 2)
+                    cv2.line(frame, (gx, gy-15), (gx, gy+15), (0, 0, 255), 2)
+                    
+                    # Hit Info
+                    row = self.df_gaze.iloc[idx]
+                    hit_role = row.get('Hit_Role', 'None')
+                    hit_aoi = row.get('Hit_AOI', 'None')
+                    info_lines.append("-" * 20)
+                    info_lines.append(f"Gaze X,Y: {gx}, {gy}")
+                    info_lines.append(f"Hit Role: {hit_role}")
+                    info_lines.append(f"Hit AOI:  {hit_aoi}")
+                    
+                    if str(hit_role) != "None" and pd.notna(hit_role):
+                        cv2.putText(frame, f"HIT: {hit_role}-{hit_aoi}", (gx + 20, gy - 20), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-        # Rendering
+        # Update Info Box
+        self.txt_info.config(state="normal")
+        self.txt_info.delete("1.0", tk.END)
+        self.txt_info.insert("1.0", "\n".join(info_lines))
+        self.txt_info.config(state="disabled")
+
+        # Display Image
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(frame)
         
-        # Resize per la finestra
-        c_w, c_h = self.lbl_vid.winfo_width(), self.lbl_vid.winfo_height()
-        if c_w > 10:
-            img.thumbnail((c_w, c_h))
-        
+        # Resize to fit label
+        w = self.lbl_video.winfo_width()
+        h = self.lbl_video.winfo_height()
+        if w > 10 and h > 10:
+            img.thumbnail((w, h), Image.Resampling.LANCZOS)
+            
         imgtk = ImageTk.PhotoImage(image=img)
-        self.lbl_vid.imgtk = imgtk # Keep reference!
-        self.lbl_vid.configure(image=imgtk)
-        self.lbl_info.config(text=f"T: {curr_sec:.2f}s | {toi_txt}")
+        self.lbl_video.imgtk = imgtk # type: ignore # Keep ref
+        self.lbl_video.configure(image=imgtk)
 
-# Blocco per testarlo da solo
-if __name__ == "__main__":
-    root = tk.Tk()
-    root.title("Reviewer Standalone")
-    root.geometry("1000x700")
-    app = ReviewerView(root)
-    root.mainloop()
+    def _fmt_time(self, seconds):
+        m = int(seconds // 60)
+        s = int(seconds % 60)
+        ms = int((seconds - int(seconds)) * 100)
+        return f"{m:02d}:{s:02d}.{ms:02d}"
