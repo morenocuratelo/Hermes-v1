@@ -11,7 +11,7 @@ if not exist "%VENV_PY%" (
     exit /b 1
 )
 
-"%VENV_PY%" hermes_unified.py
+"%VENV_PY%" hermes_unified.py %*
 set "APP_EXIT=%errorlevel%"
 
 if not "%APP_EXIT%"=="0" (

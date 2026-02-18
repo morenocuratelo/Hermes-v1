@@ -17,6 +17,8 @@ if %errorlevel% equ 0 (
 if not defined UV_CMD if exist "%USERPROFILE%\.local\bin\uv.exe" (
     set "UV_CMD=%USERPROFILE%\.local\bin\uv.exe"
 )
+if not defined UV_CMD if exist "%LOCALAPPDATA%\uv\uv.exe" set "UV_CMD=%LOCALAPPDATA%\uv\uv.exe"
+if not defined UV_CMD if exist "%USERPROFILE%\.cargo\bin\uv.exe" set "UV_CMD=%USERPROFILE%\.cargo\bin\uv.exe"
 
 if not defined UV_CMD (
     echo [HERMES] uv non trovato. Installazione automatica...
@@ -27,9 +29,11 @@ if not defined UV_CMD (
         exit /b 1
     )
 
-    if exist "%USERPROFILE%\.local\bin\uv.exe" (
-        set "UV_CMD=%USERPROFILE%\.local\bin\uv.exe"
-    ) else (
+    if exist "%USERPROFILE%\.local\bin\uv.exe" set "UV_CMD=%USERPROFILE%\.local\bin\uv.exe"
+    if not defined UV_CMD if exist "%LOCALAPPDATA%\uv\uv.exe" set "UV_CMD=%LOCALAPPDATA%\uv\uv.exe"
+    if not defined UV_CMD if exist "%USERPROFILE%\.cargo\bin\uv.exe" set "UV_CMD=%USERPROFILE%\.cargo\bin\uv.exe"
+
+    if not defined UV_CMD (
         where uv >nul 2>&1
         if %errorlevel% equ 0 set "UV_CMD=uv"
     )
@@ -103,13 +107,21 @@ if not exist "%REQ_FILE%" (
 )
 
 echo [HERMES] Preparazione requirements compatibili con uv...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$c = Get-Content -LiteralPath 'requirements.txt'; $c = $c -replace '^\s*torch==(.+)\\+cu\\d+$','torch==$1' -replace '^\s*torchaudio==(.+)\\+cu\\d+$','torchaudio==$1' -replace '^\s*torchvision==(.+)\\+cu\\d+$','torchvision==$1'; Set-Content -LiteralPath 'requirements.setup.txt' -Value $c -Encoding ASCII"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$c = Get-Content -LiteralPath 'requirements.txt'; $c = $c -replace '^\s*torch==(.+)\+cu\d+$','torch==$1' -replace '^\s*torchaudio==(.+)\+cu\d+$','torchaudio==$1' -replace '^\s*torchvision==(.+)\+cu\d+$','torchvision==$1'; $c = $c | Where-Object { $_ -notmatch '^\s*(pyinstaller|pyinstaller-hooks-contrib|pefile|pywin32-ctypes|altgraph|ruff)\b' }; $c = $c | Where-Object { $_ -notmatch '^\s*opencv-python==' }; Set-Content -LiteralPath 'requirements.setup.txt' -Value $c -Encoding ASCII"
 if %errorlevel% neq 0 (
     echo AVVISO: Impossibile generare requirements.setup.txt. Uso requirements.txt originale.
 ) else (
     set "REQ_FILE=%REQ_FILE_SETUP%"
 )
 
+echo [HERMES] Installazione PyTorch con supporto CUDA...
+"%UV_CMD%" pip install --python "%VENV_PY%" torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
+if %errorlevel% neq 0 (
+    echo [HERMES] AVVISO: PyTorch CUDA non installato, provo versione CPU...
+    "%UV_CMD%" pip install --python "%VENV_PY%" torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+)
+
+echo [HERMES] Installazione altre dipendenze...
 "%UV_CMD%" pip install --python "%VENV_PY%" -r "%REQ_FILE%"
 if %errorlevel% neq 0 (
     echo.
@@ -132,6 +144,16 @@ if %errorlevel% neq 0 (
 )
 
 if exist "%REQ_FILE_SETUP%" del /q "%REQ_FILE_SETUP%" >nul 2>&1
+
+echo [HERMES] Ripristino configurazione utente...
+if exist "hermes_global_config.default.json" (
+    copy /y "hermes_global_config.default.json" "hermes_global_config.json" >nul
+    echo [HERMES] hermes_global_config.json ripristinato da default.
+)
+if exist "hermes_config.json" (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$j = @{last_project=$null; recent_files=@{video=@(); data=@()}}; $j | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath 'hermes_config.json' -Encoding UTF8"
+    echo [HERMES] hermes_config.json ripristinato.
+)
 
 echo [HERMES] Controllo e download modelli mancanti...
 "%VENV_PY%" tools\download_models.py
