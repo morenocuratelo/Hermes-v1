@@ -30,11 +30,12 @@ TRACKERS_CONFIG_DIR = os.path.join("Configs", "Trackers")
 # Sebbene questi valori siano stati scelti come default basati sulla letteratura (COCO benchmarks), il nostro strumento espone esplicitamente questi parametri all'utente tramite GUI, permettendo una regolazione fine (fine-tuning) specifica per le condizioni di illuminazione e densità della scena analizzata, superando i limiti di un approccio 'one-size-fits-all'.
 
 
-# --- BUSINESS LOGIC LAYER ---
+# ==========================================================================================
+# --- LOGIC LAYER ---
+# ==========================================================================================
 class PoseEstimatorLogic:
     """
-    Encapsulates all computational logic for Human Pose Estimation.
-    Strictly separated from Tkinter/GUI.
+    Encapsulates all computational logic for Human Pose Estimation and Tracking (with trackers).
     """
     def __init__(self):
         pass
@@ -82,6 +83,7 @@ class PoseEstimatorLogic:
                 os.remove(dest_path)
             return False
 
+# Trackers configurabili tramite YAML. Questa funzione genera dinamicamente un file di configurazione per il tracker scelto, basandosi sui parametri forniti dall'utente attraverso l'interfaccia. Supporta i tracker più comuni (BoT-SORT, ByteTrack) e consente di abilitare/disabilitare funzionalità avanzate come ReID, oltre a personalizzare soglie critiche per l'associazione e la gestione dei track.
     def generate_tracker_config(self, params, filename="custom_tracker.yaml", config_dir=TRACKERS_CONFIG_DIR):
         lines = [
             f"tracker_type: {params.get('tracker_type', 'botsort')}",
@@ -107,7 +109,7 @@ class PoseEstimatorLogic:
                 lines.append(f"model: '{reid_weights}'")
             elif params.get('with_reid', False):
                 lines.append("with_reid: True")
-                lines.append("model: osnet_x0_25_msmt17.pt")
+                lines.append("model: resnet50_msmt17_ready.pt")
             else:
                 lines.append("with_reid: False")
 
@@ -119,6 +121,7 @@ class PoseEstimatorLogic:
             f.write("\n".join(lines))
         return tracker_path
 
+# La funzione export_to_csv_flat converte il file JSON compresso generato dall'analisi YOLO in un formato CSV "piatto" (flattened), dove ogni riga rappresenta una singola rilevazione di persona in un frame, con colonne per frame index, timestamp, track ID, confidenza, coordinate della bounding box e keypoints (x, y, conf) per ciascuno dei 17 punti chiave standard. Questo formato è più facilmente importabile in software di analisi dati come Excel o Python (pandas) per ulteriori elaborazioni o visualizzazioni.
     def export_to_csv_flat(self, json_gz_path, on_log=None):
         try:
             if on_log:
@@ -168,6 +171,7 @@ class PoseEstimatorLogic:
                 on_log(f"⚠️ CSV Export error: {e}")
             return False
 
+# La funzione run_analysis è il cuore del processo, orchestrando l'intero flusso di lavoro dall'inizio alla fine. Gestisce il controllo dei modelli (scaricando quelli mancanti), la generazione dinamica della configurazione del tracker in base ai parametri dell'utente, l'esecuzione dell'inferenza con YOLO (con o senza tracking), e infine la scrittura dei risultati in un file JSON compresso. Durante tutto il processo, fornisce feedback in tempo reale tramite callback per log e progress bar, garantendo un'esperienza utente informativa e reattiva.
     def run_analysis(self, config, on_progress=None, on_log=None):
         """
         Main execution method.
@@ -186,7 +190,7 @@ class PoseEstimatorLogic:
         # 1. ReID Model Check
         reid_path = None
         if tracker_params.get('with_reid') and tracker_params.get('tracker_type') == 'botsort':
-            reid_name = tracker_params.get('reid_model_name', "osnet_x0_25_msmt17.pt")
+            reid_name = tracker_params.get('reid_model_name', "resnet50_msmt17_ready.pt")
             reid_path = os.path.join(models_dir, reid_name)
             
             if not os.path.exists(reid_path):

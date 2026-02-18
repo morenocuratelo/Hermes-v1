@@ -28,6 +28,9 @@ class AppContext:
         # 4. Global Settings (Shared across project)
         self.cast = {} 
         self.yolo_model_path = None 
+        # Path overrides set by GUI/runtime (per participant, in-memory).
+        # Structure: {participant_id_or_"__global__": {key: absolute_path}}
+        self._manual_paths = {}
 
         # Load global app config on startup
         self.load_global_config()
@@ -94,6 +97,7 @@ class AppContext:
     def create_project(self, parent_folder, name):
         """Creates the folder structure for a new multi-participant project."""
         self.project_root = os.path.join(parent_folder, name)
+        self._manual_paths = {}
         
         if os.path.exists(self.project_root):
             raise FileExistsError(f"Folder '{name}' already exists in that location.")
@@ -125,6 +129,7 @@ class AppContext:
             raise ValueError("Not a valid HERMES project folder (missing hermes_project.json).")
         
         self.project_root = project_dir
+        self._manual_paths = {}
         with open(config_path, 'r') as f:
             self.project_config = json.load(f)
             
@@ -180,6 +185,30 @@ class AppContext:
         else:
             print(f"PARTICIPANT: Error, {pid} not found.")
 
+    def _active_key(self):
+        return self.current_participant or "__global__"
+
+    def _get_manual_path(self, key):
+        # Prefer active participant override, fallback to global override.
+        active = self._active_key()
+        active_map = self._manual_paths.get(active, {})
+        if key in active_map:
+            return active_map[key]
+        global_map = self._manual_paths.get("__global__", {})
+        return global_map.get(key)
+
+    def _set_manual_path(self, key, val):
+        active = self._active_key()
+        if not val:
+            if active in self._manual_paths and key in self._manual_paths[active]:
+                del self._manual_paths[active][key]
+                if not self._manual_paths[active]:
+                    del self._manual_paths[active]
+            return
+
+        path = os.path.abspath(str(val))
+        self._manual_paths.setdefault(active, {})[key] = path
+
     # ════════════════════════════════════════════════════════════════
     # DYNAMIC PATH RESOLUTION (The Magic Trick)
     # These properties allow modules (Human, Entity, etc.) to ask for
@@ -227,25 +256,34 @@ class AppContext:
     # --- 1. VIDEO PATH ---
     @property
     def video_path(self):
+        manual = self._get_manual_path("video_path")
+        if manual:
+            return manual
         return self._find_file(self._get_active_input_dir(), ('.mp4', '.avi', '.mov', '.mkv'))
     
     @video_path.setter
     def video_path(self, val): 
-        # Read-only property derived from file system state.
-        pass
+        self._set_manual_path("video_path", val)
 
     # --- 2. GAZE DATA (Tobii .gz) ---
     @property
     def gaze_data_path(self):
+        manual = self._get_manual_path("gaze_data_path")
+        if manual:
+            return manual
         # Must be .gz but NOT _yolo.json.gz
         return self._find_file(self._get_active_input_dir(), '.gz', exclude='_yolo')
         
     @gaze_data_path.setter
-    def gaze_data_path(self, val): pass
+    def gaze_data_path(self, val):
+        self._set_manual_path("gaze_data_path", val)
 
     # --- 3. POSE DATA (YOLO Output) ---
     @property
     def pose_data_path(self):
+        manual = self._get_manual_path("pose_data_path")
+        if manual:
+            return manual
         # Prioritize Output folder, fallback to Input (if imported manually)
         out_f = self._find_file(self._get_active_output_dir(), '_yolo.json.gz')
         if out_f:
@@ -253,19 +291,27 @@ class AppContext:
         return self._find_file(self._get_active_input_dir(), '_yolo.json.gz')
 
     @pose_data_path.setter
-    def pose_data_path(self, val): pass
+    def pose_data_path(self, val):
+        self._set_manual_path("pose_data_path", val)
 
     # --- 4. IDENTITY MAP ---
     @property
     def identity_map_path(self):
+        manual = self._get_manual_path("identity_map_path")
+        if manual:
+            return manual
         return self._find_file(self._get_active_output_dir(), '_identity.json')
 
     @identity_map_path.setter
-    def identity_map_path(self, val): pass
+    def identity_map_path(self, val):
+        self._set_manual_path("identity_map_path", val)
 
     # --- 5. TOI FILE (Time Windows) ---
     @property
     def toi_path(self):
+        manual = self._get_manual_path("toi_path")
+        if manual:
+            return manual
         # Look for generated _tois.tsv first
         out_f = self._find_file(self._get_active_output_dir(), '_tois.tsv')
         if out_f:
@@ -274,11 +320,15 @@ class AppContext:
         return self._find_file(self._get_active_input_dir(), ('.tsv', '.txt'))
 
     @toi_path.setter
-    def toi_path(self, val): pass
+    def toi_path(self, val):
+        self._set_manual_path("toi_path", val)
 
     # --- 6. CSV OUTPUTS (AOI / Mapped) ---
     @property
     def aoi_csv_path(self):
+        manual = self._get_manual_path("aoi_csv_path")
+        if manual:
+            return manual
         # Finds a CSV that is NOT "mapped" or "results" or "final"
         folder = self._get_active_output_dir()
         if not folder:
@@ -290,14 +340,19 @@ class AppContext:
         return None
         
     @aoi_csv_path.setter
-    def aoi_csv_path(self, val): pass
+    def aoi_csv_path(self, val):
+        self._set_manual_path("aoi_csv_path", val)
 
     @property
     def mapped_csv_path(self):
+        manual = self._get_manual_path("mapped_csv_path")
+        if manual:
+            return manual
         return self._find_file(self._get_active_output_dir(), '_mapped.csv')
 
     @mapped_csv_path.setter
-    def mapped_csv_path(self, val): pass
+    def mapped_csv_path(self, val):
+        self._set_manual_path("mapped_csv_path", val)
 
     # --- PATHS DICTIONARY (Legacy Compatibility) ---
     @property
