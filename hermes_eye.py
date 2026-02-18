@@ -4,6 +4,7 @@ import pandas as pd
 import json
 import gzip
 import os
+import math
 import threading
 import cv2
 from PIL import Image, ImageTk
@@ -69,6 +70,101 @@ class GazeLogic:
     # ── Hit-Testing ─────────────────────────────────────────────
 
     @staticmethod
+    def _point_in_polygon(px: float, py: float, points: list[tuple[float, float]]) -> bool:
+        if len(points) < 3:
+            return False
+        inside = False
+        j = len(points) - 1
+        for i in range(len(points)):
+            xi, yi = points[i]
+            xj, yj = points[j]
+            intersects = ((yi > py) != (yj > py)) and (
+                px < (xj - xi) * (py - yi) / max(1e-9, (yj - yi)) + xi
+            )
+            if intersects:
+                inside = not inside
+            j = i
+        return inside
+
+    @staticmethod
+    def _polygon_area(points: list[tuple[float, float]]) -> float:
+        if len(points) < 3:
+            return 0.0
+        area = 0.0
+        for i in range(len(points)):
+            x1, y1 = points[i]
+            x2, y2 = points[(i + 1) % len(points)]
+            area += (x1 * y2) - (x2 * y1)
+        return abs(area) / 2.0
+
+    @staticmethod
+    def _parse_shape_points(raw) -> list[tuple[float, float]]:
+        if raw is None:
+            return []
+        if isinstance(raw, list):
+            seq = raw
+        else:
+            txt = str(raw).strip()
+            if txt == "" or txt.lower() == "nan":
+                return []
+            try:
+                seq = json.loads(txt)
+            except Exception:
+                return []
+        pts: list[tuple[float, float]] = []
+        if isinstance(seq, list):
+            for p in seq:
+                if isinstance(p, (list, tuple)) and len(p) >= 2:
+                    try:
+                        pts.append((float(p[0]), float(p[1])))
+                    except (TypeError, ValueError):
+                        continue
+        return pts
+
+    @staticmethod
+    def _shape_hit_and_area(gaze_x: float, gaze_y: float, aoi: dict) -> tuple[bool, float, str]:
+        x1 = float(aoi.get('x1', 0))
+        y1 = float(aoi.get('y1', 0))
+        x2 = float(aoi.get('x2', 0))
+        y2 = float(aoi.get('y2', 0))
+        if x2 < x1:
+            x1, x2 = x2, x1
+        if y2 < y1:
+            y1, y2 = y2, y1
+        box_area = max(1.0, (x2 - x1) * (y2 - y1))
+
+        shape = str(aoi.get("ShapeType", "box")).lower()
+        if shape == "circle":
+            cx = float(aoi.get("CenterX", (x1 + x2) / 2))
+            cy = float(aoi.get("CenterY", (y1 + y2) / 2))
+            r = float(aoi.get("Radius", min(x2 - x1, y2 - y1) / 2))
+            r = max(1.0, r)
+            dx = gaze_x - cx
+            dy = gaze_y - cy
+            return (dx * dx + dy * dy) <= (r * r), max(1.0, math.pi * r * r), "circle"
+
+        if shape in ("oval", "ellipse"):
+            cx = float(aoi.get("CenterX", (x1 + x2) / 2))
+            cy = float(aoi.get("CenterY", (y1 + y2) / 2))
+            rx = float(aoi.get("RadiusX", (x2 - x1) / 2))
+            ry = float(aoi.get("RadiusY", (y2 - y1) / 2))
+            rx = max(1.0, rx)
+            ry = max(1.0, ry)
+            nx = (gaze_x - cx) / rx
+            ny = (gaze_y - cy) / ry
+            return (nx * nx + ny * ny) <= 1.0, max(1.0, math.pi * rx * ry), "oval"
+
+        if shape == "polygon":
+            points = GazeLogic._parse_shape_points(aoi.get("ShapePoints", ""))
+            if len(points) >= 3:
+                hit = GazeLogic._point_in_polygon(gaze_x, gaze_y, points)
+                area = max(1.0, GazeLogic._polygon_area(points))
+                return hit, area, "polygon"
+
+        hit = (x1 <= gaze_x <= x2 and y1 <= gaze_y <= y2)
+        return hit, box_area, "box"
+
+    @staticmethod
     def calculate_hit(gaze_x: float, gaze_y: float,
                       aois_in_frame: list[dict],
                       id_col_name: str) -> dict | None:
@@ -88,8 +184,8 @@ class GazeLogic:
             
             # If the gaze point is within the bounding box, it calculates the area of the AOI (width * height) 
             # and adds it to a list of hits.
-            if x1 <= gaze_x <= x2 and y1 <= gaze_y <= y2:
-                area = (x2 - x1) * (y2 - y1)
+            is_hit, area, shape = GazeLogic._shape_hit_and_area(gaze_x, gaze_y, aoi)
+            if is_hit:
                 
                 # The dictionary for each hit contains the role (e.g., "Hand"), the AOI name (e.g., "Person A Hand"), 
                 # the track ID, and the area of the AOI.
@@ -98,6 +194,11 @@ class GazeLogic:
                     "aoi":  aoi['AOI'],
                     "tid":  aoi[id_col_name],
                     "area": area,
+                    "shape": shape,
+                    "x1": x1,
+                    "y1": y1,
+                    "x2": x2,
+                    "y2": y2,
                 })
 
         # If the loop finishes and the list is empty, the user was looking at the background. 
@@ -148,7 +249,7 @@ class GazeLogic:
         if progress_callback:
             progress_callback(f"AOI indexed ({len(aoi_lookup)} frames). Streaming gaze…")
 
-        # 2. Stream gaze data (RESTO DEL BLOCCO RIMANE UGUALE FINO AL SALVATAGGIO)
+        # 2. Stream gaze data 
         output_rows: list[dict] = []
 
         # With the gazedata.gz file open, it reads it line by line. 
@@ -202,8 +303,12 @@ class GazeLogic:
 
                 if best:
                     hit_role, hit_aoi, hit_tid = best['role'], best['aoi'], best['tid']
+                    hit_shape = best.get('shape', 'box')
+                    hit_x1, hit_y1, hit_x2, hit_y2 = best['x1'], best['y1'], best['x2'], best['y2']
                 else:
                     hit_role, hit_aoi, hit_tid = "None", "None", -1
+                    hit_shape = "None"
+                    hit_x1, hit_y1, hit_x2, hit_y2 = -1, -1, -1, -1
 
 
                 output_rows.append({
@@ -214,6 +319,11 @@ class GazeLogic:
                     "Hit_Role":     hit_role,
                     "Hit_AOI":      hit_aoi,
                     "Hit_TrackID":  hit_tid,
+                    "Hit_Shape":    hit_shape,
+                    "Hit_x1":       hit_x1,
+                    "Hit_y1":       hit_y1,
+                    "Hit_x2":       hit_x2,
+                    "Hit_y2":       hit_y2,
                     "Raw_Gaze2D_X": gx,
                     "Raw_Gaze2D_Y": gy,
                 })
