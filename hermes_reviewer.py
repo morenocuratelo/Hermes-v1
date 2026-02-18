@@ -75,12 +75,9 @@ class TimelineWidget(tk.Canvas):
             sec = perc * self.duration
             self.command_seek(sec)
 
-class ReviewerView:
-    def __init__(self, parent, context=None):
-        self.parent = parent
-        self.context = context
-        
-        # Data State
+class ReviewerLogic:
+    """Separated logic for Reviewer state and data management."""
+    def __init__(self):
         self.cap = None
         self.df_gaze = None
         self.df_tois = None
@@ -88,13 +85,64 @@ class ReviewerView:
         self.fps = 30.0
         self.total_duration = 0.0
         self.total_frames = 0
-        self.is_playing = False
         self.current_frame = 0
         
         # Gaze Data Cache
         self.gaze_t = []
         self.gaze_x = []
         self.gaze_y = []
+
+    def load_video(self, path):
+        if not os.path.exists(path): return False
+        self.cap = cv2.VideoCapture(path)
+        if not self.cap.isOpened(): return False
+            
+        self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
+        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.total_duration = self.total_frames / self.fps
+        return True
+
+    def load_tois(self, path):
+        if not os.path.exists(path): return False
+        try:
+            sep = '\t' if path.endswith('.tsv') or path.endswith('.txt') else ','
+            self.df_tois = pd.read_csv(path, sep=sep)
+            if 'Start' in self.df_tois.columns:
+                self.df_tois = self.df_tois.sort_values('Start').reset_index(drop=True)
+            return True
+        except Exception:
+            return False
+
+    def load_gaze(self, path):
+        if not os.path.exists(path): return False
+        try:
+            df = pd.read_csv(path)
+            req = ['Timestamp', 'Gaze_X', 'Gaze_Y']
+            if not all(c in df.columns for c in req):
+                if 'gaze2d_x' in df.columns:
+                    df.rename(columns={'gaze2d_x': 'Gaze_X', 'gaze2d_y': 'Gaze_Y', 'timestamp': 'Timestamp'}, inplace=True)
+                else:
+                    return False
+            
+            self.df_gaze = df.sort_values('Timestamp').reset_index(drop=True)
+            self.gaze_t = self.df_gaze['Timestamp'].values
+            self.gaze_x = self.df_gaze['Gaze_X'].values
+            self.gaze_y = self.df_gaze['Gaze_Y'].values
+            return True
+        except Exception:
+            return False
+
+    def get_frame_image(self):
+        if not self.cap: return False, None
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
+        return self.cap.read()
+
+class ReviewerView:
+    def __init__(self, parent, context=None):
+        self.parent = parent
+        self.context = context
+        self.logic = ReviewerLogic()
+        self.is_playing = False
         
         # UI Variables
         self.video_path_var = tk.StringVar()
@@ -201,54 +249,23 @@ class ReviewerView:
                 self.load_gaze(self.context.mapped_csv_path)
 
     def load_video(self, path):
-        if not os.path.exists(path): return
-        self.cap = cv2.VideoCapture(path)
-        if not self.cap.isOpened():
+        if not self.logic.load_video(path):
             messagebox.showerror("Error", "Could not open video.")
             return
-            
-        self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
-        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.total_duration = self.total_frames / self.fps
         
-        self.timeline.set_data(self.total_duration, self.df_tois)
+        self.timeline.set_data(self.logic.total_duration, self.logic.df_tois)
         self.show_frame()
 
     def load_tois(self, path):
-        if not os.path.exists(path): return
-        try:
-            sep = '\t' if path.endswith('.tsv') or path.endswith('.txt') else ','
-            self.df_tois = pd.read_csv(path, sep=sep)
-            
-            # Sort by Start time for correct navigation
-            if 'Start' in self.df_tois.columns:
-                self.df_tois = self.df_tois.sort_values('Start').reset_index(drop=True)
-                
-            if self.cap:
-                self.timeline.set_data(self.total_duration, self.df_tois)
-        except Exception as e:
-            messagebox.showerror("TOI Error", str(e))
+        if self.logic.load_tois(path):
+            if self.logic.cap:
+                self.timeline.set_data(self.logic.total_duration, self.logic.df_tois)
+        else:
+            messagebox.showerror("TOI Error", "Could not load TOI file.")
 
     def load_gaze(self, path):
-        if not os.path.exists(path): return
-        try:
-            df = pd.read_csv(path)
-            # Expecting columns from hermes_eye.py: Timestamp, Gaze_X, Gaze_Y, Hit_AOI, Hit_Role
-            req = ['Timestamp', 'Gaze_X', 'Gaze_Y']
-            if not all(c in df.columns for c in req):
-                # Try fallback for raw data
-                if 'gaze2d_x' in df.columns: # Example fallback
-                    df.rename(columns={'gaze2d_x': 'Gaze_X', 'gaze2d_y': 'Gaze_Y', 'timestamp': 'Timestamp'}, inplace=True)
-                else:
-                    raise ValueError(f"Missing columns. Expected {req}")
-            
-            self.df_gaze = df.sort_values('Timestamp').reset_index(drop=True)
-            self.gaze_t = self.df_gaze['Timestamp'].values
-            self.gaze_x = self.df_gaze['Gaze_X'].values
-            self.gaze_y = self.df_gaze['Gaze_Y'].values
-            
-        except Exception as e:
-            messagebox.showerror("Gaze Error", str(e))
+        if not self.logic.load_gaze(path):
+            messagebox.showerror("Gaze Error", "Could not load Gaze file or missing columns.")
 
     # --- Playback Logic ---
 
@@ -259,68 +276,65 @@ class ReviewerView:
             self.play_loop()
 
     def play_loop(self):
-        if not self.is_playing or not self.cap:
+        if not self.is_playing or not self.logic.cap:
             return
         
-        self.current_frame += 1
-        if self.current_frame >= self.total_frames:
+        self.logic.current_frame += 1
+        if self.logic.current_frame >= self.logic.total_frames:
             self.is_playing = False
             self.btn_play.config(text="▶ Play")
             return
             
         self.show_frame()
-        delay = int(1000 / self.fps)
+        delay = int(1000 / self.logic.fps)
         self.parent.after(delay, self.play_loop)
 
     def seek_seconds(self, sec):
-        if not self.cap: return
-        self.current_frame = int(sec * self.fps)
-        self.current_frame = max(0, min(self.total_frames - 1, self.current_frame))
+        if not self.logic.cap: return
+        self.logic.current_frame = int(sec * self.logic.fps)
+        self.logic.current_frame = max(0, min(self.logic.total_frames - 1, self.logic.current_frame))
         self.show_frame()
 
     def seek_relative_sec(self, delta):
-        self.seek_seconds((self.current_frame / self.fps) + delta)
+        self.seek_seconds((self.logic.current_frame / self.logic.fps) + delta)
 
     def seek_relative_frames(self, delta):
-        if not self.cap: return
-        self.current_frame = max(0, min(self.total_frames - 1, self.current_frame + delta))
+        if not self.logic.cap: return
+        self.logic.current_frame = max(0, min(self.logic.total_frames - 1, self.logic.current_frame + delta))
         self.show_frame()
 
     def seek_toi(self, direction):
-        if self.df_tois is None or self.df_tois.empty:
+        if self.logic.df_tois is None or self.logic.df_tois.empty:
             return
         
-        curr_sec = self.current_frame / self.fps
+        curr_sec = self.logic.current_frame / self.logic.fps
         
         if direction > 0:
             # Next TOI: Find first TOI starting after current time
-            candidates = self.df_tois[self.df_tois['Start'] > (curr_sec + 0.1)]
+            candidates = self.logic.df_tois[self.logic.df_tois['Start'] > (curr_sec + 0.1)]
             if not candidates.empty:
                 self.seek_seconds(candidates.iloc[0]['Start'])
         else:
             # Prev TOI: Find last TOI starting before current time
-            candidates = self.df_tois[self.df_tois['Start'] < (curr_sec - 0.1)]
+            candidates = self.logic.df_tois[self.logic.df_tois['Start'] < (curr_sec - 0.1)]
             if not candidates.empty:
                 self.seek_seconds(candidates.iloc[-1]['Start'])
 
     def show_frame(self):
-        if not self.cap: return
+        ret, frame = self.logic.get_frame_image()
+        if not ret or frame is None: return
         
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
-        ret, frame = self.cap.read()
-        if not ret: return
-        
-        curr_sec = self.current_frame / self.fps
+        curr_sec = self.logic.current_frame / self.logic.fps
         self.timeline.update_cursor(curr_sec)
-        self.lbl_time.config(text=f"{self._fmt_time(curr_sec)} / {self._fmt_time(self.total_duration)}")
+        self.lbl_time.config(text=f"{self._fmt_time(curr_sec)} / {self._fmt_time(self.logic.total_duration)}")
         
         # Overlays
-        info_lines = [f"Time: {curr_sec:.3f}s", f"Frame: {self.current_frame}"]
+        info_lines = [f"Time: {curr_sec:.3f}s", f"Frame: {self.logic.current_frame}"]
         
         # 1. TOI Info
         active_toi = "None"
-        if self.df_tois is not None:
-            matches = self.df_tois[(self.df_tois['Start'] <= curr_sec) & (self.df_tois['End'] >= curr_sec)]
+        if self.logic.df_tois is not None:
+            matches = self.logic.df_tois[(self.logic.df_tois['Start'] <= curr_sec) & (self.logic.df_tois['End'] >= curr_sec)]
             if not matches.empty:
                 r = matches.iloc[0]
                 active_toi = r.get('Name', 'TOI')
@@ -334,13 +348,13 @@ class ReviewerView:
                 cv2.putText(frame, f"{active_toi} ({cond})", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
         # 2. Gaze Info
-        if self.df_gaze is not None:
-            idx = bisect.bisect_left(self.gaze_t, curr_sec)
-            if idx < len(self.gaze_t):
+        if self.logic.df_gaze is not None:
+            idx = bisect.bisect_left(self.logic.gaze_t, curr_sec)
+            if idx < len(self.logic.gaze_t):
                 # Check if sample is close enough (e.g. within 1 frame duration)
-                sample_t = self.gaze_t[idx]
-                if abs(sample_t - curr_sec) < (1.0 / self.fps):
-                    gx, gy = int(self.gaze_x[idx]), int(self.gaze_y[idx])
+                sample_t = self.logic.gaze_t[idx]
+                if abs(sample_t - curr_sec) < (1.0 / self.logic.fps):
+                    gx, gy = int(self.logic.gaze_x[idx]), int(self.logic.gaze_y[idx])
                     
                     # Draw Crosshair
                     cv2.circle(frame, (gx, gy), 10, (0, 0, 255), 2)
@@ -348,7 +362,7 @@ class ReviewerView:
                     cv2.line(frame, (gx, gy-15), (gx, gy+15), (0, 0, 255), 2)
                     
                     # Hit Info
-                    row = self.df_gaze.iloc[idx]
+                    row = self.logic.df_gaze.iloc[idx]
                     hit_role = row.get('Hit_Role', 'None')
                     hit_aoi = row.get('Hit_AOI', 'None')
                     info_lines.append("-" * 20)
