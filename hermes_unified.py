@@ -114,6 +114,122 @@ class ProjectWizard:
             messagebox.showerror("Load Error", str(e))
 
 # ════════════════════════════════════════════════════════════════
+# PARTICIPANT WIZARD (Standardizzazione e Import)
+# ════════════════════════════════════════════════════════════════
+
+class ParticipantWizard:
+    def __init__(self, parent, context, on_complete):
+        self.win = tk.Toplevel(parent)
+        self.win.title("New Participant Wizard")
+        self.win.geometry("650x650")
+        self.context = context
+        self.on_complete = on_complete
+
+        # Variabili ID
+        self.var_exp = tk.StringVar(value="Exp")
+        self.var_group = tk.StringVar(value="Grp")
+        self.var_cond = tk.StringVar(value="Cond")
+        self.var_num = tk.StringVar(value="01")
+        self.var_init = tk.StringVar(value="XX")
+        self.var_preview = tk.StringVar()
+
+        # Variabili File
+        self.path_video = tk.StringVar()
+        self.path_gaze = tk.StringVar()
+        self.path_events = tk.StringVar()
+        self.path_results = tk.StringVar()
+
+        self._setup_ui()
+        self._update_preview()
+
+    def _setup_ui(self):
+        # 1. ID Generation
+        lf_id = ttk.LabelFrame(self.win, text="1. Participant Identity", padding=10)
+        lf_id.pack(fill=tk.X, padx=10, pady=10)
+
+        grid = ttk.Frame(lf_id)
+        grid.pack(fill=tk.X)
+
+        self._add_field(grid, 0, "Experiment:", self.var_exp)
+        self._add_field(grid, 1, "Group (e.g. TD):", self.var_group)
+        self._add_field(grid, 2, "Condition (e.g. Inv):", self.var_cond)
+        self._add_field(grid, 3, "Number:", self.var_num)
+        self._add_field(grid, 4, "Initials:", self.var_init)
+
+        ttk.Separator(lf_id, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+        
+        f_prev = ttk.Frame(lf_id)
+        f_prev.pack(fill=tk.X)
+        ttk.Label(f_prev, text="Generated ID: ", font=("Segoe UI", 10)).pack(side=tk.LEFT)
+        ttk.Label(f_prev, textvariable=self.var_preview, font=("Consolas", 12, "bold"), foreground="blue").pack(side=tk.LEFT)
+
+        # 2. File Import
+        lf_files = ttk.LabelFrame(self.win, text="2. Import Input Files (Optional)", padding=10)
+        lf_files.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self._add_file_picker(lf_files, "Video Source:", self.path_video, "*.mp4 *.avi *.mov")
+        self._add_file_picker(lf_files, "Gaze Data (.gz):", self.path_gaze, "*.gz")
+        self._add_file_picker(lf_files, "Tobii Events (.json):", self.path_events, "*.json")
+        self._add_file_picker(lf_files, "Results (.mat/.csv):", self.path_results, "*.mat *.m *.csv *.txt")
+
+        # 3. Buttons
+        btn_f = ttk.Frame(self.win, padding=10)
+        btn_f.pack(fill=tk.X, side=tk.BOTTOM)
+        ttk.Button(btn_f, text="Create & Import", command=self.create_participant, width=20).pack(side=tk.RIGHT)
+        ttk.Button(btn_f, text="Cancel", command=self.win.destroy).pack(side=tk.RIGHT, padx=10)
+
+    def _add_field(self, parent, row, label, var):
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=2)
+        e = ttk.Entry(parent, textvariable=var)
+        e.grid(row=row, column=1, sticky="ew", padx=5, pady=2)
+        e.bind("<KeyRelease>", lambda e: self._update_preview())
+        parent.columnconfigure(1, weight=1)
+
+    def _add_file_picker(self, parent, label, var, ft):
+        f = ttk.Frame(parent)
+        f.pack(fill=tk.X, pady=2)
+        ttk.Label(f, text=label, width=15).pack(side=tk.LEFT)
+        ttk.Entry(f, textvariable=var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        ttk.Button(f, text="...", width=3, command=lambda: self._browse(var, ft)).pack(side=tk.LEFT)
+
+    def _browse(self, var, ft):
+        f = filedialog.askopenfilename(filetypes=[("Files", ft)])
+        if f: var.set(f)
+
+    def _update_preview(self):
+        pid = f"{self.var_exp.get()}_{self.var_group.get()}_{self.var_cond.get()}_{self.var_num.get()}_{self.var_init.get()}"
+        self.var_preview.set(pid)
+
+    def create_participant(self):
+        pid = self.var_preview.get()
+        if not pid: return
+
+        if pid in self.context.participants:
+            messagebox.showerror("Error", f"Participant {pid} already exists.")
+            return
+
+        # 1. Create Folder Structure
+        self.context.add_participant(pid)
+
+        # 2. Copy & Rename Files
+        if self.path_video.get():
+            ext = os.path.splitext(self.path_video.get())[1]
+            self.context.import_file_for_participant(pid, self.path_video.get(), f"{pid}_video{ext}")
+        
+        if self.path_gaze.get():
+            self.context.import_file_for_participant(pid, self.path_gaze.get(), f"{pid}_gaze.gz")
+            
+        if self.path_events.get():
+            self.context.import_file_for_participant(pid, self.path_events.get(), f"{pid}_events.json")
+
+        if self.path_results.get():
+            ext = os.path.splitext(self.path_results.get())[1]
+            self.context.import_file_for_participant(pid, self.path_results.get(), f"{pid}_results{ext}")
+
+        self.win.destroy()
+        self.on_complete(pid)
+
+# ════════════════════════════════════════════════════════════════
 # MAIN APP (Unified Interface)
 # ════════════════════════════════════════════════════════════════
 
@@ -220,9 +336,10 @@ class HermesUnifiedApp:
                 self._reload_current_view()
 
     def _add_participant(self):
-        pid = simpledialog.askstring("New Participant", "ID (e.g. P002):")
+        ParticipantWizard(self.root, self.context, self._on_participant_created)
+
+    def _on_participant_created(self, pid):
         if pid:
-            self.context.add_participant(pid)
             self.cb_part['values'] = self.context.participants
             self.cb_part.set(pid)
             self._on_participant_change(None)

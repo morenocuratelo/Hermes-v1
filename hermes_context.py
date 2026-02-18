@@ -372,7 +372,7 @@ class AppContext:
     # FILE IMPORT UTILITIES
     # ════════════════════════════════════════════════════════════════
 
-    def import_file_for_participant(self, pid, source_path):
+    def import_file_for_participant(self, pid, source_path, rename_to=None):
         """
         Copies a file into the specific participant's INPUT folder.
         """
@@ -382,7 +382,7 @@ class AppContext:
         if not os.path.exists(dest_dir):
             return None
         
-        filename = os.path.basename(source_path)
+        filename = rename_to if rename_to else os.path.basename(source_path)
         dest_path = os.path.join(dest_dir, filename)
         
         try:
