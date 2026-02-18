@@ -27,8 +27,9 @@ class ProfileManager:
             return json.load(f)
         
 class ProfileWizard:
-    def __init__(self, root):
+    def __init__(self, root, profiles_dir=None):
         self.root = root
+        self.profiles_dir = profiles_dir or "profiles"
         self.root.title("Universal Profile Generator - Lab Modigliani")
         self.root.geometry("900x850")
         
@@ -311,13 +312,13 @@ class ProfileWizard:
             }
         }
 
-        # Salvataggio
-        if not os.path.exists("profiles"):
-            os.makedirs("profiles")
+        # Salvataggio nella cartella del progetto (profiles_toi)
+        if not os.path.exists(self.profiles_dir):
+            os.makedirs(self.profiles_dir)
         
         # Sanitize filename
         safe_name = "".join([c if c.isalnum() else "_" for c in p_name]).lower() + ".json"
-        path = os.path.join("profiles", safe_name)
+        path = os.path.join(self.profiles_dir, safe_name)
         
         try:
             with open(path, 'w') as f:
@@ -680,7 +681,9 @@ class TOIGeneratorView:
     def launch_wizard(self):
         win = tk.Toplevel(self.parent)
         win.title("Profile Wizard")
-        ProfileWizard(win)
+        ProfileWizard(win, profiles_dir=self.pm.profiles_dir)
+        # Aggiorna la lista profili quando il wizard viene chiuso
+        win.bind("<Destroy>", lambda e: self.refresh_profiles())
 
     def run_cropping(self):
         raw_in = self.yolo_raw_path.get().strip()

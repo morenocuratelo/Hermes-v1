@@ -9,4 +9,4 @@ gmc_method: sparseOptFlow
 proximity_thresh: 0.5
 appearance_thresh: 0.25
 with_reid: True
-model: 'E:/Documenti/UniTo/Lab modigliani/Exp/BW_2025/TobiiPro Lab/Hermes v1/Prove/prova7/Bwww/assets/models/resnet50_msmt17_ready.pt'
+model: 'E:/Documenti/UniTo/Lab modigliani/Exp/BW_2025/TobiiPro Lab/Hermes v1/Prove/prova7\Bwww\assets\models\yolo26x-pose.pt'

@@ -28,6 +28,49 @@ MATCH_THRESHOLD = 0.8 # Standard BoT-SORT
 RANDOM_SEED = 42
 ULTRALYTICS_URL = "https://github.com/ultralytics/assets/releases/download/v8.4.0/"
 TRACKERS_CONFIG_DIR = os.path.join("Configs", "Trackers")
+MIN_MODEL_SIZE_BYTES = 1024 * 1024  # 1 MB — soglia minima per considerare un file .pt valido
+
+# Sorgenti per i modelli ReID.
+# I file *_ready.pt sono versioni convertite per Ultralytics (via fix_weights.py).
+# Se la sorgente diretta non funziona, si scarica il .pth originale da torchreid e si converte inline.
+REID_SOURCES = {
+    "resnet50_msmt17_ready.pt": {
+        # resnet50 trained on MSMT17 (combineall) — da torchreid MODEL_ZOO.md
+        # https://drive.google.com/file/d/1yiBteqgIZoOeywE8AhGmEQl7FTVwrQmf/view
+        "pth_gdrive_id": "1yiBteqgIZoOeywE8AhGmEQl7FTVwrQmf",
+        "pth_name": "resnet50_msmt17.pth",
+    },
+    "osnet_ain_x1_0_ready.pt": {
+        # osnet_ain_x1_0 trained on MSMT17 (cosine, combineall) — da torchreid MODEL_ZOO.md
+        # https://drive.google.com/file/d/1hypJvq8G04SOby6jvF337GEkg5K_bmCw/view
+        "pth_gdrive_id": "1hypJvq8G04SOby6jvF337GEkg5K_bmCw",
+        "pth_name": "osnet_ain_x1_0_msmt17.pth",
+    },
+}
+
+
+def _is_valid_model_file(path: str) -> bool:
+    """
+    Ritorna True solo se il file:
+    - esiste sul disco
+    - pesa almeno MIN_MODEL_SIZE_BYTES (1 MB)
+    - NON è un puntatore Git LFS (header 'version https://git-lfs...')
+
+    I puntatori LFS sono file di testo di ~133 byte che vengono scambiati per modelli
+    validi da os.path.exists(), causando l'errore 'invalid load key' di pickle.
+    """
+    if not os.path.exists(path):
+        return False
+    if os.path.getsize(path) < MIN_MODEL_SIZE_BYTES:
+        return False
+    try:
+        with open(path, "rb") as f:
+            head = f.read(128).decode("utf-8", errors="ignore")
+        if "git-lfs.github.com" in head:
+            return False
+    except Exception:
+        return False
+    return True
 # Sebbene questi valori siano stati scelti come default basati sulla letteratura (COCO benchmarks), 
 # il nostro strumento espone esplicitamente questi parametri all'utente tramite GUI, 
 # permettendo una regolazione fine (fine-tuning) specifica per le condizioni di illuminazione e densità 
@@ -63,6 +106,14 @@ class PoseEstimatorLogic:
     def download_model(self, model_name, dest_path, on_progress=None, on_log=None):
         if on_log:
             on_log(f"📥 Downloading model: {model_name}...")
+
+        # I modelli ReID non sono su Ultralytics GitHub Releases.
+        # Si scarica il .pth originale da torchreid e si converte inline al formato Ultralytics.
+        reid_info = REID_SOURCES.get(model_name)
+        if reid_info:
+            return self._download_and_convert_reid(reid_info, dest_path, on_log)
+
+        # Modelli YOLO standard: scaricati da Ultralytics GitHub Releases.
         url = ULTRALYTICS_URL + model_name
         try:
             response = requests.get(url, stream=True, timeout=10)
@@ -85,6 +136,91 @@ class PoseEstimatorLogic:
                 on_log(f"❌ Download error: {e}")
             if os.path.exists(dest_path):
                 os.remove(dest_path)
+            return False
+
+    def _gdrive_download(self, file_id, dest_path, on_log=None):
+        """
+        Scarica un singolo file da Google Drive tramite gdown o urllib diretto.
+        Ritorna True se il file scaricato è valido (≥ 1 MB, non puntatore LFS).
+        """
+        # Tentativo 1: gdown
+        try:
+            import gdown  # type: ignore
+            url = f"https://drive.google.com/uc?id={file_id}"
+            if on_log:
+                on_log(f"   gdown: id={file_id}...")
+            out = gdown.download(url, dest_path, quiet=False, fuzzy=True)
+            if out and _is_valid_model_file(dest_path):
+                return True
+            if on_log:
+                on_log(f"   gdown scaricato ma file non valido ({os.path.getsize(dest_path) if os.path.exists(dest_path) else 0} byte)")
+        except Exception as e:
+            if on_log:
+                on_log(f"   gdown fallito ({e}), provo urllib diretto...")
+
+        # Tentativo 2: urllib diretto con confirm=t
+        try:
+            from urllib.request import Request, urlopen
+            import shutil
+            direct_url = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t"
+            if on_log:
+                on_log(f"   urllib diretto: {direct_url[:60]}...")
+            req = Request(direct_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urlopen(req, timeout=120) as resp, open(dest_path, "wb") as out_f:
+                shutil.copyfileobj(resp, out_f)
+            if _is_valid_model_file(dest_path):
+                return True
+            raise RuntimeError(f"File non valido dopo download ({os.path.getsize(dest_path)} byte).")
+        except Exception as e:
+            if on_log:
+                on_log(f"   urllib fallito: {e}")
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
+            return False
+
+    def _download_and_convert_reid(self, reid_info, dest_ready_path, on_log=None):
+        """
+        Scarica il file .pth originale torchreid da Google Drive e lo converte
+        inline al formato Ultralytics (*_ready.pt), applicando la stessa logica
+        di Models/fix_weights.py.
+        """
+        pth_gdrive_id = reid_info["pth_gdrive_id"]
+        pth_name      = reid_info["pth_name"]
+        pth_path      = dest_ready_path.replace("_ready.pt", ".pth").replace(".pt", ".pth")
+        # Usa come cartella temporanea la stessa cartella di destinazione
+        pth_path = os.path.join(os.path.dirname(dest_ready_path), pth_name)
+
+        if on_log:
+            on_log(f"   Scarico modello originale torchreid: {pth_name}")
+
+        if not _is_valid_model_file(pth_path):
+            ok = self._gdrive_download(pth_gdrive_id, pth_path, on_log)
+            if not ok:
+                if on_log:
+                    on_log(f"❌ Impossibile scaricare {pth_name} da Google Drive.")
+                return False
+
+        # Conversione inline (logica identica a Models/fix_weights.py)
+        if on_log:
+            on_log(f"   Conversione {pth_name} → {os.path.basename(dest_ready_path)}...")
+        try:
+            raw = torch.load(pth_path, map_location="cpu", weights_only=True)
+            state_dict = raw
+            if isinstance(raw, dict):
+                if "state_dict" in raw:
+                    state_dict = raw["state_dict"]
+                elif "model" in raw and isinstance(raw["model"], dict):
+                    state_dict = raw["model"]
+            clean = {k[7:] if k.startswith("module.") else k: v for k, v in state_dict.items()}
+            torch.save({"model": clean}, dest_ready_path)
+            if on_log:
+                on_log(f"✅ Modello ReID pronto: {os.path.basename(dest_ready_path)}")
+            return True
+        except Exception as e:
+            if on_log:
+                on_log(f"❌ Conversione fallita: {e}")
+            if os.path.exists(dest_ready_path):
+                os.remove(dest_ready_path)
             return False
 
 # Trackers configurabili tramite YAML. Questa funzione genera dinamicamente un file di configurazione per il tracker scelto, basandosi sui parametri forniti dall'utente attraverso l'interfaccia. Supporta i tracker più comuni (BoT-SORT, ByteTrack) e consente di abilitare/disabilitare funzionalità avanzate come ReID, oltre a personalizzare soglie critiche per l'associazione e la gestione dei track.
@@ -191,24 +327,16 @@ class PoseEstimatorLogic:
         if on_log:
             on_log("--- Analysis Started ---")
         
-        # 1. ReID Model Check (BoT-SORT specific ReIdentification model)
-        reid_path = None
+        # 1. ReID Mode
+        # In Ultralytics 8.4.x, BoT-SORT usa il modello YOLO scelto dall'utente anche come ReID encoder.
+        # ReID(model) → load_checkpoint(model) → ckpt["model"].float().eval()
+        # Il modello YOLO è già validato al punto 4; passarne il path evita download extra e garantisce
+        # coerenza con l'architettura scelta (es. yolo26x-pose.pt → backbone X come feature extractor).
         if tracker_params.get('with_reid') and tracker_params.get('tracker_type') == 'botsort':
-            reid_name = tracker_params.get('reid_model_name', "resnet50_msmt17_ready.pt")
-            reid_path = os.path.join(models_dir, reid_name)
-            
-            if not os.path.exists(reid_path):
-                if on_log:
-                    on_log(f"Missing ReID model, starting download: {reid_name}")
-                if not self.download_model(reid_name, reid_path, on_progress, on_log):
-                    if on_log:
-                        on_log("⚠️ ReID download failed. Disabling ReID.")
-                    tracker_params['with_reid'] = False
-                    reid_path = None
-            
-            if reid_path: 
-                reid_path = reid_path.replace("\\", "/")
-                tracker_params['reid_weights'] = reid_path
+            reid_model_path = os.path.join(models_dir, model_name)
+            if on_log:
+                on_log(f"ℹ️ ReID mode: using '{model_name}' as appearance encoder")
+            tracker_params['reid_weights'] = reid_model_path
 
         # 2. Generate Tracker Config
         tracker_config_file = self.generate_tracker_config(tracker_params, f"custom_{tracker_params['tracker_type']}.yaml")
@@ -221,10 +349,11 @@ class PoseEstimatorLogic:
         self.set_determinism(RANDOM_SEED)
 
         # 4. YOLO Model Check
+        # Stessa logica del ReID: _is_valid_model_file rileva anche puntatori LFS
         model_path = os.path.join(models_dir, model_name)
-        if not os.path.exists(model_path):
+        if not _is_valid_model_file(model_path):
             if on_log:
-                on_log(f"Missing model, starting download: {model_name}")
+                on_log(f"Missing or invalid model (LFS pointer?): {model_name}, starting download...")
             if not self.download_model(model_name, model_path, on_progress, on_log):
                 raise Exception("Unable to download model.")
         
