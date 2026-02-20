@@ -1,252 +1,252 @@
 # H.E.R.M.E.S. - Human-centric Eye-tracking & Robust Motion Estimation Suite
 
-**HERMES** è un framework di ricerca modulare sviluppato per sincronizzare, analizzare e visualizzare dati di eye-tracking insieme all'estrazione cinematica basata su computer vision. La suite affronta la sfida metodologica di definire Aree di Interesse (AOI) dinamiche su target umani in movimento senza annotazione manuale.
+**HERMES** is a modular research framework designed to synchronize, analyze, and visualize eye-tracking data in conjunction with computer-vision-based kinematic extraction. The suite addresses the methodological challenge of defining dynamic Areas of Interest (AOIs) on moving human targets without manual annotation.
 
-Integrando la stima della posa basata su **YOLO** con rigorosi protocolli di sincronizzazione temporale, HERMES permette ai ricercatori di mappare i dati dello sguardo su regioni semantiche del corpo (es. Volto, Mani, Spazio Peripersonale) in contesti sperimentali complessi.
+By integrating **YOLO**-based pose estimation with rigorous temporal synchronization protocols, HERMES enables researchers to map gaze data onto semantic body regions (e.g., Face, Hands, Peripersonal Space) within complex experimental settings.
 
 ---
 
-## 📥 Installazione e Setup
+## 📥 Installation and Setup
 
-### Prerequisiti
-*   **OS:** Windows 10/11 (64-bit).
-*   **Hardware:** GPU NVIDIA raccomandata (supporto CUDA) per il modulo Human; l'inferenza CPU è supportata ma significativamente più lenta.
-*   **Software:** Python 3.10+ (Lo script di setup gestisce l'installazione automatica delle dipendenze).
+### Prerequisites
+*   **Operating System:** Windows 10/11 (64-bit).
+*   **Hardware:** An NVIDIA GPU is recommended (CUDA support) for the Human module; CPU inference is supported but significantly slower.
+*   **Software:** Python 3.10+ (the setup script manages automatic dependency installation).
 
-### Procedura di Installazione
+### Installation Procedure
 
-1.  **Clona la repository:**
+1.  **Clone the repository:**
     ```bash
     git clone https://github.com/morenocuratelo/Hermes-v1
     ```
-2.  **Esegui il Setup:**
-    *   Naviga nella cartella del progetto.
-    *   Esegui il file `SETUP_LAB.bat`.
-    *   *Nota:* Questo script installerà `uv` (package manager), creerà un ambiente virtuale isolato, installerà le dipendenze e scaricherà i pesi dei modelli AI necessari.
+2.  **Run the Setup:**
+    *   Navigate to the project directory.
+    *   Execute the `SETUP_LAB.bat` file.
+    *   *Note:* This script will install `uv` (package manager), create an isolated virtual environment, install all dependencies, and download the required AI model weights.
 
-3.  **Avvio:**
-    *   Una volta completato il setup, avvia l'applicazione con `AVVIA_HERMES.bat`.
-
----
-
-## 🚀 Flusso di Lavoro (Workflow)
-
-Il software impone un flusso sequenziale per garantire l'integrità dei dati. Segui i moduli numerati nell'interfaccia:
-
-1.  **Human (Pose Estimation):** Estrae lo scheletro e traccia le persone nel video.
-2.  **Entity (Identity):** Assegna ruoli (es. "Target") ai tracciati anonimi e corregge errori.
-3.  **Region (AOI Definition):** Definisce le regole geometriche per le AOI (es. Faccia = Naso + Occhi).
-4.  **Master TOI (Sync):** Sincronizza i log dell'eye-tracker con il video e definisce le fasi temporali.
-5.  **Eye Mapping:** Incrocia geometricamente lo sguardo con le AOI dinamiche.
-6.  **Stats:** Genera report statistici e file Excel completi.
+3.  **Launch:**
+    *   Once the setup is complete, launch the application via `AVVIA_HERMES.bat`.
 
 ---
 
-## ⚙️ Guida al Tuning e Configurazione Moduli
+## 🚀 Workflow
 
-Questa sezione descrive come configurare e ottimizzare ogni modulo per le tue esigenze sperimentali.
+The software enforces a sequential workflow to ensure data integrity. Follow the numbered modules in the interface:
+
+1.  **Human (Pose Estimation):** Extracts the skeleton and tracks individuals across video frames.
+2.  **Entity (Identity Assignment):** Assigns roles (e.g., "Target") to anonymous tracks and corrects tracking errors.
+3.  **Region (AOI Definition):** Defines the geometric rules for AOIs (e.g., Face = Nose + Eyes).
+4.  **Master TOI (Synchronization):** Synchronizes eye-tracker logs with the video and defines temporal phases.
+5.  **Eye Mapping:** Performs geometric intersection between gaze coordinates and dynamic AOIs.
+6.  **Stats:** Generates statistical reports and comprehensive Excel files.
+
+---
+
+## ⚙️ Module Tuning and Configuration Guide
+
+This section describes how to configure and optimize each module to suit specific experimental requirements.
 
 ### 1. Human (Kinematic Extraction)
-Utilizza YOLO per estrarre 17 keypoints scheletrici.
+Employs YOLO to extract 17 skeletal keypoints per detected individual.
 
-*   **Parametri Chiave:**
-    *   **Confidence Threshold (`CONF_THRESHOLD`):** Default `0.6`. Soglia conservativa per bilanciare precisione e richiamo. Abbassare se il soggetto non viene rilevato in condizioni di scarsa luce.
-    *   **Tracker:** Supporta `BoT-SORT` (default) e `ByteTrack`.
-    *   **Re-Identification (ReID):** Abilitare per ridurre gli scambi di ID (ID switch) quando i soggetti si incrociano. Richiede il download automatico di modelli extra (es. `resnet50`).
-*   **Output:** Genera un file `.json.gz` (raw data) e un `.csv` appiattito con coordinate e confidenza per ogni keypoint.
+*   **Key Parameters:**
+    *   **Confidence Threshold (`CONF_THRESHOLD`):** Default `0.6`. A conservative threshold that balances precision and recall. Lower this value if the participant is not detected under low-illumination conditions.
+    *   **Tracker:** Supports `BoT-SORT` (default) and `ByteTrack`.
+    *   **Re-Identification (ReID):** Enable this option to reduce identity switches (ID switches) when participants cross paths. Requires automatic download of supplementary models (e.g., `resnet50`).
+*   **Output:** Generates a `.json.gz` file (raw data) and a flattened `.csv` file containing coordinates and confidence values for each keypoint.
 
 ### 2. Entity (Identity Assignment)
-Interfaccia di post-processing per correggere errori di tracking.
+A post-processing interface for correcting tracking errors.
 
-*   **Funzionalità:**
-    *   **Merge:** Unisce due tracciati frammentati (es. ID 5 diventa parte di ID 2).
-    *   **Split:** Divide un tracciato in due se l'ID è saltato da una persona all'altra.
-    *   **Auto-Stitch:** Tenta di unire automaticamente frammenti basandosi su prossimità spaziale e temporale.
-*   **Tuning Auto-Stitch:**
-    *   `Lookahead`: Quanti frame futuri cercare per un match.
-    *   `Time Gap`: Massimo intervallo di tempo (sec) consentito per unire due tracce.
-    *   `Stitch Dist`: Massima distanza in pixel tra la fine della traccia A e l'inizio della B.
+*   **Features:**
+    *   **Merge:** Combines two fragmented tracks (e.g., ID 5 becomes part of ID 2).
+    *   **Split:** Divides a single track into two segments when the ID has erroneously jumped from one individual to another.
+    *   **Auto-Stitch:** Attempts to automatically join fragmented tracks based on spatial and temporal proximity.
+*   **Auto-Stitch Tuning Parameters:**
+    *   `Lookahead`: Number of future frames to search for a match.
+    *   `Time Gap`: Maximum time interval (in seconds) permitted between two tracks to be joined.
+    *   `Stitch Dist`: Maximum distance in pixels between the endpoint of Track A and the starting point of Track B.
 
 ### 3. Region (Dynamic AOIs)
-Definisce le Aree di Interesse basandosi sui keypoints.
+Defines Areas of Interest based on detected keypoints.
 
-*   **Profili JSON:** Le regole sono salvate in `assets/profiles_aoi`. Esempio regola per "Volto":
-    *   `kps`: [0, 1, 2, 3, 4] (Naso, Occhi, Orecchie).
-    *   `margin_px`: Padding aggiunto al bounding box dei keypoints.
-    *   `shape`: `box`, `circle`, `oval`, o `polygon`.
-*   **Ghost Tracks:** Il sistema rileva automaticamente frame dove il tracking è perso ma presente nei frame adiacenti, permettendo di interpolare o copiare la posizione dell'AOI ("Force Add").
+*   **JSON Profiles:** Rules are stored in `assets/profiles_aoi`. Example rule for "Face":
+    *   `kps`: [0, 1, 2, 3, 4] (Nose, Eyes, Ears).
+    *   `margin_px`: Padding added to the keypoint bounding box.
+    *   `shape`: `box`, `circle`, `oval`, or `polygon`.
+*   **Ghost Tracks:** The system automatically detects frames in which tracking data is absent but present in adjacent frames, enabling interpolation or positional copying of the AOI ("Force Add").
 
 ### 4. Master TOI (Synchronization)
-Allinea flussi dati asincroni (Tobii vs Video).
+Aligns asynchronous data streams (Tobii vs. Video).
 
-*   **Logica di Sync:** Calcola un offset lineare basandosi su un evento comune (es. "VideoStart" nel log Tobii e nel log sperimentale).
-*   **Data Cropping:** Una volta definiti i TOI (Time of Interest), il modulo può generare file `_CROPPED.csv` contenenti solo i dati pertinenti alle fasi di interesse, riducendo drasticamente la dimensione dei file per l'analisi statistica.
+*   **Synchronization Logic:** Computes a linear offset based on a common event marker (e.g., "VideoStart" in both the Tobii log and the experimental log).
+*   **Data Cropping:** Once the TOIs (Times of Interest) are defined, the module can generate `_CROPPED.csv` files containing only data pertaining to the phases of interest, substantially reducing file sizes for subsequent statistical analysis.
 
 ### 5. Eye Mapping
-Esegue l'hit-testing geometrico.
+Performs geometric hit-testing.
 
-*   **Logica:**
-    1.  Carica le AOI generate dal modulo Region.
-    2.  Converte il timestamp dello sguardo in frame video: `Frame = (Timestamp - Offset) * FPS`.
-    3.  Verifica se il punto di sguardo cade dentro una o più AOI.
-    4.  **Sovrapposizioni:** Se lo sguardo colpisce più AOI (es. Faccia dentro Corpo), vince l'AOI con l'**area minore** (più specifica).
+*   **Logic:**
+    1.  Loads AOIs generated by the Region module.
+    2.  Converts gaze timestamps to video frames: `Frame = (Timestamp - Offset) * FPS`.
+    3.  Determines whether the gaze point falls within one or more AOIs.
+    4.  **Overlap Resolution:** When the gaze intersects multiple AOIs simultaneously (e.g., Face within Body), the AOI with the **smallest area** (i.e., the most specific region) takes precedence.
 
 ### 6. Statistics
-Genera il report finale.
+Generates the final analytical report.
 
-*   **Metriche Calcolate:**
-    *   **Duration:** Tempo totale trascorso nell'AOI.
-    *   **Percentage:** % del tempo della fase trascorso nell'AOI.
-    *   **Latency:** Tempo al primo ingresso nell'AOI dall'inizio della fase.
-    *   **Glances:** Numero di volte che lo sguardo entra nell'AOI.
-*   **Master Report:** Può generare un file Excel multi-foglio contenente Stats, Raw Data, Mapping, e configurazioni, pronto per l'archiviazione.
+*   **Computed Metrics:**
+    *   **Duration:** Total dwell time within the AOI.
+    *   **Percentage:** Proportion of phase duration spent fixating on the AOI.
+    *   **Latency:** Time to first entry into the AOI from the onset of the phase.
+    *   **Glances:** Number of gaze transitions into the AOI.
+*   **Master Report:** Capable of generating a multi-sheet Excel file containing Stats, Raw Data, Mapping, and configurations, ready for archival and reproducibility purposes.
 
 ---
 
-## 🛠 Architettura del Sistema
+## 🛠 System Architecture
 
-Il software è costruito su **Python 3.12** e utilizza **Tkinter** per l'interfaccia grafica, garantendo compatibilità nativa su Windows senza framework pesanti. Utilizza un'architettura "Hub & Spoke" gestita da un `AppContext` centrale che assicura la persistenza dello stato tra i moduli.
+The software is built on **Python 3.12** and leverages **Tkinter** for the graphical user interface, ensuring native Windows compatibility without reliance on heavyweight frameworks. It employs a "Hub & Spoke" architecture governed by a centralized `AppContext` that guarantees state persistence across modules.
 
-### Stack Tecnico
+### Technical Stack
 *   **GUI:** Tkinter / Tcl
 *   **Computer Vision:** OpenCV, Ultralytics (YOLOv8/v11)
 *   **Data Manipulation:** Pandas, NumPy, SciPy
-*   **Packaging:** uv (environment), PyInstaller (distribuzione)
+*   **Packaging:** uv (environment management), PyInstaller (distribution)
 
 ---
 
-## 📄 Citazione e Disclaimer
+## 📄 Citation and Disclaimer
 
-Se utilizzi HERMES nella tua ricerca, fai riferimento alla documentazione interna del laboratorio per il formato di citazione appropriato.
+If you use HERMES in your research, please refer to the internal laboratory documentation for the appropriate citation format.
 
-**Disclaimer:** Questo software è fornito "così com'è" per scopi di ricerca. Assicurati di rispettare il GDPR e le linee guida etiche quando elabori dati video contenenti soggetti umani identificabili.
+**Disclaimer:** This software is provided "as is" for research purposes only. Users must ensure compliance with GDPR regulations and institutional ethical guidelines when processing video data containing identifiable human participants.
 
 
 # HERMES - Entity Module Developer Guide
 
-Questo documento descrive la logica interna, i flussi di dati e le trasformazioni implementate nel modulo **Entity** (`hermes_entity.py`). Il modulo è responsabile dell'assegnazione delle identità (Role) ai tracciati generati da YOLO, permettendo la correzione manuale e semi-automatica degli errori di tracking (frammentazione, ID switch).
+This document describes the internal logic, data flows, and transformations implemented in the **Entity** module (`hermes_entity.py`). The module is responsible for assigning identities (Roles) to the tracks generated by YOLO, enabling manual and semi-automatic correction of tracking errors (fragmentation, ID switches).
 
-## 1. Gestione della Memoria: `HistoryManager`
+## 1. Memory Management: `HistoryManager`
 
-Per supportare operazioni distruttive come Merge e Split con funzionalità di Undo/Redo, il modulo implementa un gestore di stati ibrido RAM/Disco.
+To support destructive operations such as Merge and Split with Undo/Redo functionality, the module implements a hybrid RAM/Disk state manager.
 
-*   **Logica:**
-    *   Mantiene uno stack di stati (`undo_stack`).
-    *   Ogni stato è una copia profonda (pickle) dei dati dei tracciati.
-    *   **RAM Buffer:** I primi N stati (default 5) sono mantenuti in RAM per accesso rapido.
-    *   **Disk Spilling:** Gli stati più vecchi vengono serializzati su file temporanei su disco per evitare di saturare la memoria, specialmente con video lunghi e molti tracciati.
-    *   **Cleanup:** Alla chiusura, i file temporanei vengono eliminati.
+*   **Logic:**
+    *   Maintains a stack of states (`undo_stack`).
+    *   Each state is a deep copy (pickle-serialized) of the track data.
+    *   **RAM Buffer:** The first N states (default: 5) are retained in RAM for rapid access.
+    *   **Disk Spilling:** Older states are serialized to temporary files on disk to prevent memory saturation, particularly with long-duration videos containing numerous tracks.
+    *   **Cleanup:** Upon termination, all temporary files are deleted.
 
-## 2. Logica di Manipolazione Tracciati: `IdentityLogic`
+## 2. Track Manipulation Logic: `IdentityLogic`
 
-Questa classe gestisce la struttura dati principale e le operazioni algoritmiche.
+This class manages the primary data structures and algorithmic operations.
 
-### 2.1. Struttura Dati (`self.tracks`)
+### 2.1. Data Structure (`self.tracks`)
 
-I dati non sono mantenuti come lista di frame (come in YOLO), ma aggregati per ID ("Track-Oriented").
+Data are not maintained as a frame-indexed list (as in YOLO output) but are aggregated by ID ("Track-Oriented").
 
-*   **Struttura:** Dizionario `{ TrackID : TrackData }`
+*   **Structure:** Dictionary `{ TrackID : TrackData }`
 *   **TrackData:**
-    *   `frames`: Lista ordinata dei frame in cui l'ID appare.
-    *   `boxes`: Lista corrispondente delle bounding box `[x1, y1, x2, y2]`.
-    *   `role`: Ruolo assegnato (es. "Target", "Ignore"). Default: "Ignore".
-    *   `merged_from`: Lista di ID originali che sono stati fusi in questo tracciato.
-*   **Lineage (`self.id_lineage`):** Mappa `{ Original_ID : Current_Master_ID }`. Fondamentale per l'export finale: permette di sapere che l'ID 5 di YOLO ora fa parte dell'ID 2.
+    *   `frames`: Ordered list of frames in which the ID appears.
+    *   `boxes`: Corresponding list of bounding boxes `[x1, y1, x2, y2]`.
+    *   `role`: Assigned role (e.g., "Target", "Ignore"). Default: "Ignore".
+    *   `merged_from`: List of original IDs that have been merged into this track.
+*   **Lineage (`self.id_lineage`):** Map `{ Original_ID : Current_Master_ID }`. This is essential for final export: it records, for instance, that YOLO's ID 5 is now part of ID 2.
 
-### 2.2. Caricamento Dati (`load_from_json_gz`)
+### 2.2. Data Loading (`load_from_json_gz`)
 
-*   **Input:** File `.json.gz` generato dal modulo Human (YOLO).
-*   **Trasformazione:**
-    1.  Legge riga per riga (streaming).
-    2.  **Gestione ID -1 (Untracked):** Se YOLO non ha assegnato un ID (detection isolata), viene generato un **ID Sintetico** univoco: `9000000 + (frame_idx * 1000) + detection_idx`. Questo rende ogni detection "untracked" un tracciato a sé stante manipolabile.
-    3.  Aggrega le detection nel dizionario `self.tracks`.
+*   **Input:** `.json.gz` file generated by the Human module (YOLO).
+*   **Transformation:**
+    1.  Reads line by line (streaming).
+    2.  **Handling ID -1 (Untracked):** If YOLO has not assigned an ID (isolated detection), a **Synthetic ID** is generated: `9000000 + (frame_idx * 1000) + detection_idx`. This renders each untracked detection an independently manipulable track.
+    3.  Aggregates detections into the `self.tracks` dictionary.
 
-### 2.3. Operazioni di Merge (`merge_logic`)
+### 2.3. Merge Operations (`merge_logic`)
 
-Unisce due tracciati ("Master" e "Slave") in uno solo.
+Combines two tracks ("Master" and "Slave") into a single entity.
 
-*   **Logica:**
-    1.  Trasferisce tutti i frame e box dallo Slave al Master.
-    2.  Aggiorna `merged_from` del Master.
-    3.  Aggiorna `id_lineage`: tutti gli ID che puntavano allo Slave ora puntano al Master.
-    4.  Elimina la chiave dello Slave da `self.tracks`.
-    5.  **Riordino:** Ordina le liste `frames` e `boxes` del Master per indice temporale.
+*   **Logic:**
+    1.  Transfers all frames and bounding boxes from the Slave to the Master.
+    2.  Updates the Master's `merged_from` list.
+    3.  Updates `id_lineage`: all IDs previously pointing to the Slave now point to the Master.
+    4.  Removes the Slave's key from `self.tracks`.
+    5.  **Reordering:** Sorts the Master's `frames` and `boxes` lists by temporal index.
 
-### 2.4. Operazioni di Split (`split_track`)
+### 2.4. Split Operations (`split_track`)
 
-Divide un tracciato in due parti in un punto specifico.
+Divides a track into two segments at a specified frame boundary.
 
-*   **Input:** `track_id`, `split_frame`, `keep_head` (booleano).
-*   **Logica:**
-    1.  Trova l'indice di taglio nelle liste `frames`.
-    2.  Genera un `new_id` (Max ID esistente + 1).
-    3.  Divide le liste `frames` e `boxes` in `head` (prima del taglio) e `tail` (dopo).
-    4.  Se `keep_head` è True:
-        *   L'ID originale mantiene la parte `head`.
-        *   Il `new_id` riceve la parte `tail`.
-    5.  Se `keep_head` è False (default per correzione ID switch):
-        *   L'ID originale mantiene la parte `tail`.
-        *   Il `new_id` riceve la parte `head`.
+*   **Input:** `track_id`, `split_frame`, `keep_head` (boolean).
+*   **Logic:**
+    1.  Locates the split index within the `frames` lists.
+    2.  Generates a `new_id` (Max existing ID + 1).
+    3.  Partitions the `frames` and `boxes` lists into `head` (before the split) and `tail` (after the split).
+    4.  If `keep_head` is True:
+        *   The original ID retains the `head` segment.
+        *   The `new_id` receives the `tail` segment.
+    5.  If `keep_head` is False (default for ID switch correction):
+        *   The original ID retains the `tail` segment.
+        *   The `new_id` receives the `head` segment.
 
-### 2.5. Algoritmi di Correzione Automatica
+### 2.5. Automatic Correction Algorithms
 
 *   **Auto-Stitch (`auto_stitch`):**
-    *   Tenta di unire frammenti consecutivi non assegnati.
-    *   **Criteri:**
-        1.  Gap temporale < `time_gap` (es. 2 secondi).
-        2.  Distanza spaziale (Euclidea tra centro box finale A e iniziale B) < `stitch_dist`.
+    *   Attempts to join temporally consecutive unassigned fragments.
+    *   **Criteria:**
+        1.  Temporal gap < `time_gap` (e.g., 2 seconds).
+        2.  Spatial distance (Euclidean distance between the center of the final bounding box of Track A and the initial bounding box of Track B) < `stitch_dist`.
 *   **Absorb Noise (`absorb_noise`):**
-    *   Tenta di unire frammenti "Ignore" (rumore) ai tracciati principali ("Target", ecc.).
-    *   Utile per recuperare arti persi o detection momentanee che appartengono al soggetto principale.
-    *   Usa criteri di prossimità spaziale molto stretti.
+    *   Attempts to merge "Ignore" fragments (noise) into primary tracks ("Target", etc.).
+    *   Useful for recovering lost limb detections or transient detections that belong to the principal participant.
+    *   Employs strict spatial proximity criteria.
 
-## 3. Interfaccia Utente: `IdentityView`
+## 3. User Interface: `IdentityView`
 
-Gestisce l'interazione visuale e la sincronizzazione tra Video, Timeline e Lista Tracciati.
+Manages visual interaction and synchronization between the Video, Timeline, and Track List components.
 
-### 3.1. Timeline Visiva (`_draw_timeline`)
+### 3.1. Visual Timeline (`_draw_timeline`)
 
-Disegna una rappresentazione temporale dei tracciati.
+Renders a temporal representation of all tracks.
 
 *   **Rendering:**
-    *   I tracciati "Ignore" sono disegnati come sfondo grigio.
-    *   I tracciati assegnati a un Ruolo sono disegnati con il colore del ruolo.
-    *   Ogni Ruolo ha una "corsia" (riga) dedicata per evitare sovrapposizioni visive.
+    *   "Ignore" tracks are drawn as a grey background layer.
+    *   Tracks assigned to a Role are rendered in the role's designated color.
+    *   Each Role occupies a dedicated "lane" (row) to prevent visual overlap.
 
-### 3.2. Selezione Sincronizzata (`_on_video_click`)
+### 3.2. Synchronized Selection (`_on_video_click`)
 
-Permette di selezionare un tracciato cliccando direttamente sul video.
+Enables track selection by clicking directly on the video feed.
 
-*   **Logica:**
-    1.  Riceve le coordinate click (x, y) sul widget video.
-    2.  Le converte in coordinate video originali (gestendo il ridimensionamento/letterboxing dell'immagine).
-    3.  Interroga `logic.get_track_at_point` per trovare quale ID possiede una bounding box che contiene quel punto nel frame corrente.
-    4.  Seleziona l'ID corrispondente nella Treeview laterale.
+*   **Logic:**
+    1.  Receives click coordinates (x, y) on the video widget.
+    2.  Converts them to original video coordinates (accounting for widget rescaling and letterboxing).
+    3.  Queries `logic.get_track_at_point` to identify which ID possesses a bounding box containing the selected point in the current frame.
+    4.  Highlights the corresponding ID in the lateral Treeview.
 
-## 4. Output Dati (`save_mapping`)
+## 4. Data Output (`save_mapping`)
 
-Genera il file finale di mappatura identità.
+Generates the final identity mapping file.
 
 *   **File:** `_identity.json`
-*   **Contenuto:** Un dizionario piatto `{ Original_YOLO_ID : "RoleName" }`.
-*   **Trasformazione:**
-    1.  Itera su `id_lineage`.
-    2.  Per ogni ID originale, controlla chi è il suo "Master" attuale.
-    3.  Se il Master ha un ruolo diverso da "Ignore", scrive la mappatura.
-*   **Scopo:** Questo file viene usato dai moduli successivi (Region, Eye Mapping) per sapere che, ad esempio, l'ID 45, l'ID 46 e l'ID 98 sono tutti "Target".
+*   **Content:** A flat dictionary `{ Original_YOLO_ID : "RoleName" }`.
+*   **Transformation:**
+    1.  Iterates over `id_lineage`.
+    2.  For each original ID, resolves the current "Master" ID.
+    3.  If the Master has a role other than "Ignore", the mapping is written.
+*   **Purpose:** This file is consumed by downstream modules (Region, Eye Mapping) to determine that, for example, IDs 45, 46, and 98 all correspond to "Target".
 
 ---
 
-### Nota sui File Autosave
-Il modulo salva periodicamente lo stato in `hermes_autosave_identity.json` nella cartella del progetto per prevenire perdita di dati in caso di crash. Al riavvio, chiede se ripristinare.
+### Note on Autosave Files
+The module periodically saves the current state to `hermes_autosave_identity.json` in the project directory to prevent data loss in the event of a crash. Upon restart, the user is prompted to restore the saved session.
 
 # HERMES - Region Module Developer Guide
 
 This document details the internal logic, parameters, and workflows of the **Region** module (Spatial AOI Definition). It is intended for developers or researchers wishing to modify the underlying scripts for dynamic Area of Interest generation.
 
-## 1. Global Constants & Keypoints
+## 1. Global Constants and Keypoints
 
-The module relies on the standard COCO Keypoint format used by YOLO-Pose. These indices are mapped to anatomical names in `KEYPOINTS_MAP`.
+The module relies on the standard COCO Keypoint format employed by YOLO-Pose. These indices are mapped to anatomical labels in `KEYPOINTS_MAP`.
 
 ```python
 KEYPOINTS_MAP = {
@@ -259,11 +259,11 @@ KEYPOINTS_MAP = {
 
 ## 2. Profile Management (`AOIProfileManager`)
 
-Profiles define how raw keypoints are converted into semantic Areas of Interest (e.g., "Face", "Hands"). They are stored as JSON files in `assets/profiles_aoi`.
+Profiles define how raw keypoints are transformed into semantic Areas of Interest (e.g., "Face", "Hands"). They are stored as JSON files in `assets/profiles_aoi`.
 
 ### 2.1. Profile Structure
 
-A profile consists of **Roles** (mapped from the Entity module) and **Rules** for each role.
+A profile comprises **Roles** (mapped from the Entity module) and **Rules** for each role.
 
 ```json
 {
@@ -288,12 +288,12 @@ A profile consists of **Roles** (mapped from the Entity module) and **Rules** fo
 
 | Parameter | Type | Description |
 | :--- | :--- | :--- |
-| **name** | String | Name of the AOI (e.g., "Face"). |
+| **name** | String | Label for the AOI (e.g., "Face"). |
 | **shape** | String | Geometry type: `box`, `circle`, `oval`, `polygon`. |
-| **kps** | List[int] | Indices of keypoints used to calculate the base bounding box. |
-| **margin_px** | Int | Padding added to the raw bounding box of keypoints. |
-| **scale_w/h** | Float | Multiplier to expand/shrink width or height from the center. |
-| **offset_y_bottom** | Int | Extra pixels added to the bottom edge (useful for torsos/legs). |
+| **kps** | List[int] | Indices of keypoints used to compute the base bounding box. |
+| **margin_px** | Int | Padding applied to the raw keypoint bounding box. |
+| **scale_w/h** | Float | Multiplicative factor to expand or contract width or height relative to the center. |
+| **offset_y_bottom** | Int | Additional pixels appended to the bottom edge (useful for torso/leg regions). |
 
 ---
 
@@ -303,44 +303,44 @@ The `RegionLogic` class handles the geometric computations and state management,
 
 ### 3.1. Geometry Engine (`calculate_shape`)
 
-This is the core function that transforms keypoints into shapes.
+This is the core function that transforms keypoints into geometric shapes.
 
-1.  **Base Box Calculation:**
+1.  **Base Bounding Box Calculation:**
     *   Extracts valid keypoints (confidence > threshold).
-    *   Computes min/max X and Y.
+    *   Computes the minimum and maximum X and Y coordinates.
     *   Applies `margin_px`.
-    *   Applies `scale_w` and `scale_h` relative to the center.
+    *   Applies `scale_w` and `scale_h` relative to the centroid.
     *   Applies `offset_y_bottom`.
 
 2.  **Shape Morphing:**
-    *   **Box:** Returns the calculated rectangle.
-    *   **Circle:** Calculates center and radius based on the box dimensions.
-    *   **Oval:** Calculates center and semi-axes (rx, ry).
-    *   **Polygon:** Maps the relative positions of keypoints from the source box to the expanded box, ordering points to form a convex hull-like shape.
+    *   **Box:** Returns the computed rectangle.
+    *   **Circle:** Derives center and radius from the bounding box dimensions.
+    *   **Oval:** Derives center and semi-axes (rx, ry).
+    *   **Polygon:** Maps the relative positions of keypoints from the source bounding box to the expanded bounding box, ordering vertices to form a convex hull-like shape.
 
-### 3.2. Data Hierarchy & Overrides
+### 3.2. Data Hierarchy and Overrides
 
-The system uses a strict hierarchy to determine what is shown on screen for a given frame/track/AOI:
+The system employs a strict hierarchy to determine the rendered output for a given frame/track/AOI combination:
 
-1.  **Level 0 (Base):** Automatic calculation from YOLO keypoints using Profile Rules.
+1.  **Level 0 (Base):** Automatic computation from YOLO keypoints using Profile Rules.
 2.  **Level 1 (Manual Override):** Explicit shapes stored in `self.manual_overrides`. These take precedence over Level 0.
 
 **Storage Key:** `(frame_idx, track_id, role, aoi_name)`
 
 ### 3.3. Ghost Tracks (`find_ghost_tracks`)
 
-*   **Function:** Identifies tracks that are missing in the current frame but present in neighbors.
+*   **Function:** Identifies tracks that are absent in the current frame but present in neighboring frames.
 *   **Logic:**
-    *   Scans a window of +/- `ghost_window_var` frames.
-    *   If a track exists in a neighbor but not in the current frame (and hasn't been manually overridden), it is returned as a "Ghost".
-    *   **Purpose:** Allows the user to "Force Add" an AOI by copying the position from a nearby frame, useful for occlusions or detection failures.
+    *   Scans a window of ± `ghost_window_var` frames.
+    *   If a track exists in a neighboring frame but not in the current frame (and has not been manually overridden), it is flagged as a "Ghost."
+    *   **Purpose:** Enables the user to "Force Add" an AOI by copying positional data from an adjacent frame—particularly useful for handling temporary occlusions or detection failures.
 
 ### 3.4. Export (`export_csv`)
 
-Generates the final dataset.
+Generates the final AOI dataset.
 
-*   **Columns:** Frame, Timestamp, TrackID, Role, AOI, ShapeType, Coordinates (x1, y1, x2, y2), Geometric details (Radius, Angle, etc.), Corrected (Bool).
-*   **Logic:** Iterates through all frames, applying the Profile Rules and Manual Overrides to generate the final geometry state.
+*   **Columns:** Frame, Timestamp, TrackID, Role, AOI, ShapeType, Coordinates (x1, y1, x2, y2), Geometric details (Radius, Angle, etc.), Corrected (Boolean).
+*   **Logic:** Iterates through all frames, applying the Profile Rules and Manual Overrides to produce the definitive geometric state for each AOI.
 
 ---
 
@@ -350,308 +350,308 @@ The UI orchestrates the workflow and visualization.
 
 ### 4.1. Manual Correction Mode
 
-A stateful mode that enables editing tools.
+A stateful mode that activates editing tools.
 
-*   **State Snapshot:** When entering, the current session state is saved to allow cancellation.
+*   **State Snapshot:** Upon entry, the current session state is saved to permit cancellation.
 *   **Force Add:**
-    *   **Auto/Ghost:** Uses `find_ghost_tracks` to seed the new box position.
-    *   **Center:** Seeds the box at the screen center if no ghost is found.
-    *   **Draw:** Allows drawing the box/circle directly on the video canvas.
+    *   **Auto/Ghost:** Uses `find_ghost_tracks` to seed the initial bounding box position.
+    *   **Center:** Seeds the bounding box at the screen center if no ghost data is available.
+    *   **Draw:** Allows the user to draw the bounding box or circle directly on the video canvas.
 *   **Interpolation:**
-    *   **Linear:** Linearly interpolates box coordinates between two existing anchor frames (manual or automatic) over a selected scope.
+    *   **Linear:** Linearly interpolates bounding box coordinates between two existing anchor frames (either manual or automatic) over a user-selected scope.
 
 ### 4.2. Scopes
 
-Operations (like applying a manual edit or interpolation) act on a specific scope:
-*   **Frame:** Only the current frame.
+Operations (such as applying a manual edit or performing interpolation) act upon a defined scope:
+*   **Frame:** Current frame only.
 *   **Current TOI:** All frames within the active Time Interval of Interest.
 *   **Whole Video:** Every frame in the dataset.
 
 ### 4.3. Session Management
 
-*   **Autosave:** State is saved to `_aoi_edit_session.json` on every commit action.
-*   **Undo/Redo:** Implements a command pattern stack storing before/after states of overrides.
+*   **Autosave:** State is persisted to `_aoi_edit_session.json` upon every commit action.
+*   **Undo/Redo:** Implements a command-pattern stack storing before and after states of overrides.
 
 ### 4.4. Profile Wizard
 
-A GUI tool to generate JSON profiles without editing text files.
-*   **Visual Feedback:** Lists available keypoints.
-*   **Strategies:** Allows defining different logic for Targets vs. Non-Targets.
+A GUI tool for generating JSON profiles without manual text file editing.
+*   **Visual Feedback:** Lists all available keypoints for selection.
+*   **Strategies:** Supports defining distinct AOI logic for Targets versus Non-Targets.
 
 # HERMES - Master TOI Module Developer Guide
 
-Questo documento descrive la logica interna, i flussi di dati e le trasformazioni implementate nel modulo **Master TOI** (`hermes_master_toi.py`). Il modulo è responsabile della sincronizzazione temporale tra diverse sorgenti dati (Eye-tracker, Log comportamentali, Video) e della definizione degli intervalli temporali di interesse (TOI) per l'analisi.
+This document describes the internal logic, data flows, and transformations implemented in the **Master TOI** module (`hermes_master_toi.py`). The module is responsible for temporal synchronization between heterogeneous data sources (eye-tracker, behavioral logs, video) and for defining the temporal intervals of interest (TOIs) that structure the analysis.
 
-## 1. Logica di Gestione: `MasterToiLogic`
+## 1. Management Logic: `MasterToiLogic`
 
-La classe `MasterToiLogic` gestisce l'importazione dei log, il calcolo degli offset di sincronizzazione e la strutturazione della tabella dei TOI.
+The `MasterToiLogic` class handles log importation, synchronization offset computation, and TOI table construction.
 
-### 1.1. Importazione e Parsing Log
-
-*   **Input:**
-    *   Log Eye-Tracker (es. Tobii TSV/Excel) contenente timestamp e eventi/trigger.
-    *   Log Esterno (es. E-Prime, MATLAB, CSV manuale) contenente la sequenza degli eventi sperimentali.
-*   **Logica:**
-    *   Normalizza i nomi delle colonne (es. cerca colonne "Event", "Timestamp").
-    *   Identifica i marker di sincronizzazione comuni (es. "VideoStart", "TrialStart").
-
-### 1.2. Sincronizzazione Temporale
-
-Allinea la timeline dell'eye-tracker (tempo assoluto o relativo alla macchina) con la timeline del video o dell'esperimento.
-
-*   **Metodo:** Calcolo dell'Offset Lineare.
-    *   `Offset = Timestamp_Evento_EyeTracker - Timestamp_Evento_LogEsterno`
-    *   Applica questo offset a tutti i tempi per portarli in un sistema di riferimento comune (solitamente relativo all'inizio del video).
-
-### 1.3. Definizione TOI (Time of Interest)
-
-Costruisce la tabella principale che guida l'analisi statistica.
-
-*   **Struttura Dati:** DataFrame con colonne:
-    *   `Phase`: Nome della fase (es. "Fixation", "Stimulus").
-    *   `Condition`: Condizione sperimentale.
-    *   `Start`: Tempo inizio (secondi, sincronizzato).
-    *   `End`: Tempo fine (secondi, sincronizzato).
-    *   `Trial`: Numero progressivo (opzionale).
-*   **Output:** File `_TOI.tsv` usato da `hermes_stats.py`.
-
-## 2. Data Pruning e Export: `DataCropper`
-
-Questa classe è specializzata nel "ritagliare" (crop) i dataset voluminosi per mantenere solo i dati pertinenti ai TOI definiti, riducendo il rumore e la dimensione dei file per le analisi successive.
-
-### 2.1. Logica di Cropping
+### 1.1. Log Importation and Parsing
 
 *   **Input:**
-    *   Tabella TOI definita.
-    *   Dataset completi (YOLO Raw, Gaze Mapped).
-*   **Processo:**
-    1.  Itera su ogni TOI.
-    2.  Estrae le righe dei dataset originali dove `Start_TOI <= Timestamp <= End_TOI`.
-    3.  Aggiunge metadati del TOI (Phase, Condition) alle righe estratte.
-    4.  Concatena i risultati in un nuovo dataset "Cropped".
+    *   Eye-Tracker Log (e.g., Tobii TSV/Excel) containing timestamps and event triggers.
+    *   External Log (e.g., E-Prime, MATLAB, manual CSV) containing the sequence of experimental events.
+*   **Logic:**
+    *   Normalizes column names (e.g., searches for columns labeled "Event", "Timestamp").
+    *   Identifies common synchronization markers (e.g., "VideoStart", "TrialStart").
 
-### 2.2. Generazione Output Appiattito
+### 1.2. Temporal Synchronization
 
-Il modulo esporta i dati ritagliati in formato CSV "Long" (appiattito) per facilitare l'analisi in R/Pandas, replicando la struttura dell'export di `hermes_human.py`.
+Aligns the eye-tracker timeline (absolute or machine-relative time) with the video or experimental timeline.
 
-*   **Trasformazione YOLO:**
-    *   Input: JSON/CSV con struttura annidata o colonne multiple per keypoints.
+*   **Method:** Linear Offset Computation.
+    *   `Offset = Timestamp_Event_EyeTracker - Timestamp_Event_ExternalLog`
+    *   This offset is applied to all timestamps to project them into a common reference frame (typically relative to video onset).
+
+### 1.3. TOI (Time of Interest) Definition
+
+Constructs the principal table that governs the statistical analysis.
+
+*   **Data Structure:** DataFrame with the following columns:
+    *   `Phase`: Phase label (e.g., "Fixation", "Stimulus").
+    *   `Condition`: Experimental condition.
+    *   `Start`: Phase onset time (in seconds, synchronized).
+    *   `End`: Phase offset time (in seconds, synchronized).
+    *   `Trial`: Sequential trial number (optional).
+*   **Output:** A `_TOI.tsv` file consumed by `hermes_stats.py`.
+
+## 2. Data Pruning and Export: `DataCropper`
+
+This class specializes in cropping voluminous datasets to retain only data pertaining to the defined TOIs, thereby reducing noise and file sizes for downstream analyses.
+
+### 2.1. Cropping Logic
+
+*   **Input:**
+    *   Defined TOI table.
+    *   Complete datasets (YOLO Raw, Gaze Mapped).
+*   **Process:**
+    1.  Iterates over each TOI.
+    2.  Extracts rows from the original datasets where `Start_TOI <= Timestamp <= End_TOI`.
+    3.  Appends TOI metadata (Phase, Condition) to the extracted rows.
+    4.  Concatenates the results into a new "Cropped" dataset.
+
+### 2.2. Flattened Output Generation
+
+The module exports cropped data in a "Long" (tidy) CSV format to facilitate analysis in R or Pandas, replicating the export structure of `hermes_human.py`.
+
+*   **YOLO Transformation:**
+    *   Input: JSON/CSV with nested structures or multi-column keypoint representations.
     *   Output: `_video_yolo_CROPPED.csv`.
-    *   Struttura: `Frame`, `Timestamp`, `TrackID`, `Box`, `Keypoints` (appiattiti), `Phase`, `Condition`.
+    *   Structure: `Frame`, `Timestamp`, `TrackID`, `Box`, `Keypoints` (flattened), `Phase`, `Condition`.
 
-## 3. Interfaccia Utente: `MasterToiView`
+## 3. User Interface: `MasterToiView`
 
-Gestisce l'interazione per la definizione manuale o assistita dei TOI.
+Manages user interaction for manual or assisted TOI definition.
 
-### 3.1. Editor Tabellare
+### 3.1. Tabular Editor
 
-*   Permette all'utente di visualizzare la tabella dei TOI importata o generata.
-*   Consente modifiche manuali a `Start`, `End` e etichette (`Phase`, `Condition`).
+*   Allows the user to inspect the imported or generated TOI table.
+*   Supports manual editing of `Start`, `End`, and label fields (`Phase`, `Condition`).
 
-### 3.2. Visualizzazione Sincronizzazione
+### 3.2. Synchronization Visualization
 
-*   Mostra i timestamp degli eventi rilevati nei due log per permettere una verifica visiva dell'allineamento.
-*   Permette di aggiustare manualmente l'offset se la sincronizzazione automatica fallisce.
+*   Displays the timestamps of detected events from both logs to enable visual verification of temporal alignment.
+*   Permits manual adjustment of the offset if automatic synchronization fails.
 
 ---
 
-### Sommario Flusso Dati
+### Data Flow Summary
 
-| Input | Processo | Output |
+| Input | Process | Output |
 | :--- | :--- | :--- |
-| **Log Tobii + Log Exp** | **Sincronizzazione**<br>Allineamento timestamp su eventi comuni | **Offset Temporale** |
-| **Offset + Log Exp** | **Definizione Fasi**<br>Mappatura eventi su intervalli temporali | **Tabella TOI (.tsv)** |
-| **Tabella TOI + Dati Raw** | **Data Cropper**<br>Filtraggio temporale e arricchimento | **Dataset Cropped (.csv)**<br>(YOLO, Gaze ridotti) |
+| **Tobii Log + Exp. Log** | **Synchronization**<br>Timestamp alignment via common events | **Temporal Offset** |
+| **Offset + Exp. Log** | **Phase Definition**<br>Event-to-interval mapping | **TOI Table (.tsv)** |
+| **TOI Table + Raw Data** | **Data Cropper**<br>Temporal filtering and enrichment | **Cropped Datasets (.csv)**<br>(Reduced YOLO and Gaze) |
 
 # HERMES - Eye Mapping Module Developer Guide
 
-Questo documento descrive la logica interna, i flussi di dati e le trasformazioni implementate nel modulo **Eye Mapping** (`hermes_eye.py`). Il modulo è responsabile dell'incrocio geometrico tra i dati di sguardo (Gaze) e le Aree di Interesse (AOI) definite dinamicamente frame per frame.
+This document describes the internal logic, data flows, and transformations implemented in the **Eye Mapping** module (`hermes_eye.py`). The module is responsible for the geometric intersection between gaze data and the dynamically defined Areas of Interest (AOIs) on a frame-by-frame basis.
 
-## 1. Logica di Calcolo: `GazeLogic`
+## 1. Computation Logic: `GazeLogic`
 
-La classe `GazeLogic` gestisce la matematica del mapping spaziale e la sincronizzazione temporale.
+The `GazeLogic` class manages the spatial mapping mathematics and temporal synchronization.
 
-### 1.1. Caricamento e Indicizzazione AOI (`load_aoi_data`)
+### 1.1. AOI Loading and Indexing (`load_aoi_data`)
 
-*   **Input:** File CSV generato dal modulo Region (contenente bounding box per ogni frame).
-*   **Trasformazione:**
-    1.  Carica il CSV in un DataFrame pandas.
-    2.  Identifica dinamicamente la colonna ID (`ID` o `TrackID`).
-    3.  **Raggruppamento:** Raggruppa le righe per `Frame`.
-    4.  **Indicizzazione:** Crea un dizionario (Hash Map) `{ frame_index : [lista_di_aoi_dict] }`.
-*   **Scopo:** Permette l'accesso istantaneo (O(1)) a tutte le AOI attive in un dato frame durante lo streaming dei dati di sguardo.
+*   **Input:** CSV file generated by the Region module (containing bounding boxes for each frame).
+*   **Transformation:**
+    1.  Loads the CSV into a Pandas DataFrame.
+    2.  Dynamically identifies the ID column (`ID` or `TrackID`).
+    3.  **Grouping:** Groups rows by `Frame`.
+    4.  **Indexing:** Constructs a dictionary (hash map) `{ frame_index : [list_of_aoi_dicts] }`.
+*   **Purpose:** Enables constant-time (O(1)) access to all active AOIs for a given frame during gaze data streaming.
 
-### 1.2. Hit-Testing Geometrico (`calculate_hit`)
+### 1.2. Geometric Hit-Testing (`calculate_hit`)
 
-Questa è la funzione core che determina "cosa sta guardando il soggetto".
+This is the core function that determines "what the participant is looking at."
 
-*   **Input:** Coordinate sguardo in pixel (x, y), Lista AOI nel frame corrente.
-*   **Logica:**
-    1.  Itera su tutte le AOI presenti nel frame.
-    2.  Per ogni AOI, verifica l'intersezione geometrica in base alla forma (`_shape_hit_and_area`):
-        *   **Box:** Semplice controllo dei limiti `x1 <= x <= x2` e `y1 <= y <= y2`.
-        *   **Cerchio:** Distanza euclidea dal centro <= raggio.
-        *   **Poligono:** Algoritmo Ray Casting (`_point_in_polygon`).
-    3.  **Risoluzione Sovrapposizioni:** Se lo sguardo cade su più AOI contemporaneamente (es. "Faccia" dentro "Corpo"), viene selezionata l'AOI con l'**area minore**. Questo garantisce la massima specificità (es. hit su "Occhio" vince su "Faccia").
-*   **Output:** L'oggetto AOI vincitore o `None` (sguardo sul background).
+*   **Input:** Gaze coordinates in pixels (x, y), list of AOIs in the current frame.
+*   **Logic:**
+    1.  Iterates over all AOIs present in the frame.
+    2.  For each AOI, evaluates geometric intersection according to its shape (`_shape_hit_and_area`):
+        *   **Box:** Simple boundary check: `x1 <= x <= x2` and `y1 <= y <= y2`.
+        *   **Circle:** Euclidean distance from center ≤ radius.
+        *   **Polygon:** Ray Casting algorithm (`_point_in_polygon`).
+    3.  **Overlap Resolution:** If the gaze point falls within multiple AOIs simultaneously (e.g., "Face" inside "Body"), the AOI with the **smallest area** is selected. This ensures maximum specificity (e.g., a hit on "Eye" takes precedence over "Face").
+*   **Output:** The winning AOI object, or `None` (gaze directed at the background).
 
-### 1.3. Sincronizzazione Temporale (`timestamp_to_frame`)
+### 1.3. Temporal Synchronization (`timestamp_to_frame`)
 
-Converte il tempo assoluto dell'eye-tracker nel tempo relativo del video.
+Converts the absolute eye-tracker timestamp to the corresponding video-relative frame index.
 
 *   **Formula:** `Frame = int((Timestamp_Gaze - Sync_Offset) * FPS)`
-*   **Parametri:**
-    *   `Timestamp_Gaze`: Tempo in secondi dal file Tobii.
-    *   `Sync_Offset`: Delta temporale per allineare l'inizio del video con l'inizio della registrazione eye-tracking.
-    *   `FPS`: Frame rate del video.
+*   **Parameters:**
+    *   `Timestamp_Gaze`: Time in seconds from the Tobii recording file.
+    *   `Sync_Offset`: Temporal delta aligning video onset with the start of eye-tracking recording.
+    *   `FPS`: Video frame rate.
 
-### 1.4. Pipeline di Mapping (`run_mapping`)
+### 1.4. Mapping Pipeline (`run_mapping`)
 
-Orchestra l'intero processo in modalità streaming per gestire file di grandi dimensioni senza saturare la RAM.
+Orchestrates the entire process in streaming mode to handle large files without exhausting system memory.
 
-*   **Input:** File AOI (CSV), File Gaze (JSON.GZ), Risoluzione Video, FPS, Offset.
-*   **Flusso Dati:**
-    1.  **Caricamento AOI:** Esegue `load_aoi_data` per avere la mappa spaziale in memoria.
-    2.  **Streaming Gaze:** Apre il file `.gz` e legge riga per riga.
+*   **Input:** AOI file (CSV), Gaze file (JSON.GZ), Video resolution, FPS, Offset.
+*   **Data Flow:**
+    1.  **AOI Loading:** Executes `load_aoi_data` to construct the spatial map in memory.
+    2.  **Gaze Streaming:** Opens the `.gz` file and reads line by line.
     3.  **Parsing:**
-        *   Ignora pacchetti non validi o senza coordinate `gaze2d`.
-        *   Estrae `timestamp` e coordinate normalizzate `(gx, gy)` [0.0 - 1.0].
-    4.  **Conversione Spaziale:**
+        *   Discards invalid packets or those lacking `gaze2d` coordinates.
+        *   Extracts `timestamp` and normalized coordinates `(gx, gy)` [0.0–1.0].
+    4.  **Spatial Conversion:**
         *   `Pixel_X = gx * Video_Width`
         *   `Pixel_Y = gy * Video_Height`
-    5.  **Conversione Temporale:** Calcola il `frame_idx` usando la formula di sincronizzazione.
-    6.  **Hit-Test:** Recupera le AOI per `frame_idx` ed esegue `calculate_hit`.
-    7.  **Accumulo:** Salva il risultato (Hit/Miss, Role, AOI, TrackID) in una lista buffer.
-    8.  **Export:** Scrive il file finale `_MAPPED.csv`.
+    5.  **Temporal Conversion:** Computes the `frame_idx` using the synchronization formula.
+    6.  **Hit-Test:** Retrieves AOIs for `frame_idx` and executes `calculate_hit`.
+    7.  **Accumulation:** Stores the result (Hit/Miss, Role, AOI, TrackID) in a buffer list.
+    8.  **Export:** Writes the final `_MAPPED.csv` file.
 
-## 2. Output Dati (`_MAPPED.csv`)
+## 2. Data Output (`_MAPPED.csv`)
 
-Il file generato contiene una riga per ogni campionamento dell'eye-tracker mappato sul video.
+The generated file contains one row per eye-tracker sample mapped onto the video.
 
-| Colonna | Descrizione |
+| Column | Description |
 | :--- | :--- |
-| **Timestamp** | Tempo originale dell'eye-tracker. |
-| **Frame_Est** | Frame video stimato corrispondente. |
-| **Gaze_X, Gaze_Y** | Coordinate dello sguardo in pixel sul video. |
-| **Hit_Role** | Ruolo colpito (es. "Target", "Confederate"). "None" se miss. |
-| **Hit_AOI** | Nome AOI colpita (es. "Face", "Hands"). "None" se miss. |
-| **Hit_TrackID** | ID numerico del soggetto colpito. -1 se miss. |
-| **Hit_Shape** | Forma geometrica colpita (box, circle, polygon). |
+| **Timestamp** | Original eye-tracker timestamp. |
+| **Frame_Est** | Estimated corresponding video frame. |
+| **Gaze_X, Gaze_Y** | Gaze coordinates in pixels on the video plane. |
+| **Hit_Role** | Role of the intersected target (e.g., "Target", "Confederate"). "None" if miss. |
+| **Hit_AOI** | Name of the intersected AOI (e.g., "Face", "Hands"). "None" if miss. |
+| **Hit_TrackID** | Numeric ID of the intersected participant. -1 if miss. |
+| **Hit_Shape** | Geometric shape type intersected (box, circle, polygon). |
 
-## 3. Interfaccia Utente
+## 3. User Interface
 
 ### 3.1. `GazeView`
 
-Pannello di configurazione per lanciare il processo.
+Configuration panel for initiating the mapping process.
 
-*   **Input:** Selettori file per AOI e Gaze Data.
-*   **Parametri:** Risoluzione video (default 1920x1080), FPS, Offset di sincronizzazione.
-*   **Thread:** Esegue `run_mapping` in un thread separato (`_thread_worker`) per mantenere la UI responsiva e mostra una progress bar indeterminata (poiché la lettura stream non conosce la lunghezza totale a priori).
+*   **Input:** File selectors for AOI data and Gaze data.
+*   **Parameters:** Video resolution (default: 1920×1080), FPS, Synchronization offset.
+*   **Threading:** Executes `run_mapping` in a dedicated thread (`_thread_worker`) to maintain UI responsiveness, displaying an indeterminate progress bar (since the streaming reader cannot determine total file length a priori).
 
 ### 3.2. `GazeResultPlayer`
 
-Player video dedicato alla verifica qualitativa del mapping.
+A dedicated video player for qualitative verification of the mapping output.
 
-*   **Funzione:** Carica il video e il CSV mappato appena generato.
-*   **Visualizzazione:**
-    *   Disegna il punto di sguardo (cerchio giallo/rosso).
-    *   Se c'è un HIT, mostra il nome dell'AOI colpita in sovraimpressione.
-    *   Permette di navigare frame per frame per verificare la precisione della sincronizzazione e del tracking geometrico.
-    *   **Ottimizzazione:** Indicizza il CSV in memoria (`data_map`) per accesso rapido durante il playback video.
+*   **Functionality:** Loads the video alongside the newly generated mapped CSV file.
+*   **Visualization:**
+    *   Renders the gaze point (yellow/red circle).
+    *   When a hit is registered, displays the name of the intersected AOI as an overlay.
+    *   Supports frame-by-frame navigation to verify the precision of both synchronization and geometric tracking.
+    *   **Optimization:** Indexes the CSV in memory (`data_map`) for rapid access during video playback.
 
-    # HERMES - Stats Module Developer Guide
+# HERMES - Stats Module Developer Guide
 
-Questo documento descrive la logica interna, i flussi di dati e le trasformazioni implementate nel modulo **Stats** (`hermes_stats.py`). Il modulo è responsabile dell'aggregazione dei dati di sguardo (Gaze) mappati sugli AOI e del calcolo delle metriche statistiche basate sulle finestre temporali (TOI).
+This document describes the internal logic, data flows, and transformations implemented in the **Stats** module (`hermes_stats.py`). The module is responsible for aggregating gaze data mapped onto AOIs and computing statistical metrics within defined temporal windows (TOIs).
 
-## 1. Logica di Calcolo: `StatsLogic`
+## 1. Computation Logic: `StatsLogic`
 
-La classe `StatsLogic` incapsula il motore matematico. Non dipende dall'interfaccia grafica.
+The `StatsLogic` class encapsulates the mathematical engine. It operates independently of the graphical interface.
 
-### 1.1. Calcolo Frequenza di Campionamento (`calculate_actual_sampling_rate`)
+### 1.1. Sampling Rate Estimation (`calculate_actual_sampling_rate`)
 
-*   **Input:** DataFrame dei dati di sguardo (`df_gaze`) contenente la colonna `Timestamp`.
-*   **Logica:**
-    1.  Calcola le differenze temporali ($\Delta t$) tra righe consecutive: `df['Timestamp'].diff()`.
-    2.  **Filtro Gap:** Ignora differenze superiori a 0.1s (100ms) per evitare che buchi nei dati (blink, perdita di tracking) falsino la media.
-    3.  Calcola la media dei $\Delta t$ validi.
-    4.  Frequenza ($Hz$) = $1.0 / \text{avg\_dt}$.
-*   **Fallback:** Se i dati sono insufficienti, ritorna 50.0 Hz di default.
-*   **Scopo:** Fondamentale per convertire il *numero di campioni* in *tempo (secondi)*.
+*   **Input:** Gaze data DataFrame (`df_gaze`) containing the `Timestamp` column.
+*   **Logic:**
+    1.  Computes inter-sample time differences ($\Delta t$) between consecutive rows: `df['Timestamp'].diff()`.
+    2.  **Gap Filtering:** Excludes differences exceeding 0.1 s (100 ms) to prevent data gaps (blinks, tracking loss) from biasing the mean.
+    3.  Computes the mean of the valid $\Delta t$ values.
+    4.  Sampling frequency ($Hz$) = $1.0 / \overline{\Delta t}$.
+*   **Fallback:** If insufficient data are available, defaults to 50.0 Hz.
+*   **Purpose:** Essential for converting the *number of samples* into *time (seconds)*.
 
-### 1.2. Generazione Dataset Raw (`generate_raw_dataset`)
+### 1.2. Raw Dataset Generation (`generate_raw_dataset`)
 
-Questa funzione arricchisce il file "Mapped" (livello campione) con le informazioni contestuali dei TOI (livello fase).
+This function enriches the "Mapped" file (sample-level) with contextual information from the TOIs (phase-level).
 
 *   **Input:**
-    *   `mapped_path`: CSV generato dal modulo Eye Mapping.
-    *   `toi_path`: TSV generato dal modulo Master TOI.
-*   **Trasformazione:**
-    1.  **Caricamento:** Legge i file in DataFrame pandas.
-    2.  **Ordinamento:** Ordina i dati di sguardo per `Timestamp` (critico per l'efficienza).
-    3.  **Inizializzazione:** Aggiunge colonne vuote `Phase`, `Condition`, `Trial` al DataFrame Gaze.
-    4.  **Iterazione TOI:** Per ogni riga nel file TOI (che rappresenta una fase temporale):
-        *   Estrae `Start` e `End`.
-        *   **Binary Search:** Usa `np.searchsorted` sui timestamp dello sguardo per trovare istantaneamente gli indici di inizio (`idx_start`) e fine (`idx_end`) nel DataFrame Gaze che corrispondono alla finestra temporale.
-        *   **Assegnazione Vettoriale:** Assegna i valori di `Phase`, `Condition` e `Trial` a tutte le righe nel range `[idx_start:idx_end]` in un colpo solo.
-*   **Output:** Un DataFrame dove ogni singolo campionamento di sguardo sa a quale fase sperimentale appartiene.
+    *   `mapped_path`: CSV generated by the Eye Mapping module.
+    *   `toi_path`: TSV generated by the Master TOI module.
+*   **Transformation:**
+    1.  **Loading:** Reads both files into Pandas DataFrames.
+    2.  **Sorting:** Orders gaze data by `Timestamp` (critical for computational efficiency).
+    3.  **Initialization:** Appends empty columns `Phase`, `Condition`, `Trial` to the Gaze DataFrame.
+    4.  **TOI Iteration:** For each row in the TOI file (representing a temporal phase):
+        *   Extracts `Start` and `End`.
+        *   **Binary Search:** Uses `np.searchsorted` on gaze timestamps to instantaneously locate the start (`idx_start`) and end (`idx_end`) indices in the Gaze DataFrame corresponding to the temporal window.
+        *   **Vectorized Assignment:** Assigns the `Phase`, `Condition`, and `Trial` values to all rows in the range `[idx_start:idx_end]` in a single operation.
+*   **Output:** A DataFrame in which each individual gaze sample is annotated with its corresponding experimental phase.
 
-### 1.3. Motore di Analisi Statistica (`run_analysis`)
+### 1.3. Statistical Analysis Engine (`run_analysis`)
 
-È il cuore del modulo. Incrocia i dati spaziali (AOI hit) con quelli temporali (TOI).
+This is the core of the module. It crosses spatial data (AOI hits) with temporal data (TOIs).
 
-*   **Input:** File Mapped, File TOI, Frequenza (opzionale), Flag formato (Wide/Long).
-*   **Flusso Dati:**
-    1.  **Validazione:** Verifica la presenza delle colonne essenziali (`Hit_Role`, `Hit_AOI`, `Timestamp` nel Gaze; `Start`, `End` nel TOI).
-    2.  **Setup Frequenza:** Se l'utente non forza una frequenza, la calcola usando `calculate_actual_sampling_rate`.
-        *   `sample_dur` = $1.0 / \text{freq}$.
-    3.  **Discovery Combinazioni:** Scansiona l'intero file Gaze per trovare tutte le coppie uniche `(Hit_Role, Hit_AOI)` esistenti (es. "Target_Face", "Confederate_Hand"). Questo assicura che nel report finale ci siano colonne per tutte le AOI, anche se in una specifica fase non vengono mai guardate (valore 0).
-    4.  **Loop Fasi (TOI):** Itera su ogni intervallo temporale definito nel TOI.
-        *   **Slicing:** Estrae il sottoinsieme di campioni Gaze che cadono nel tempo della fase (`t_start` -> `t_end`).
-        *   **Metriche Generali Fase:**
-            *   `Gaze_Samples_Total`: Numero campioni nel subset.
-            *   `Gaze_Valid_Time`: `Samples * sample_dur`.
+*   **Input:** Mapped file, TOI file, Frequency (optional), Format flag (Wide/Long).
+*   **Data Flow:**
+    1.  **Validation:** Verifies the presence of essential columns (`Hit_Role`, `Hit_AOI`, `Timestamp` in Gaze; `Start`, `End` in TOI).
+    2.  **Frequency Setup:** If the user does not specify a frequency, it is computed via `calculate_actual_sampling_rate`.
+        *   `sample_dur` = $1.0 / f$.
+    3.  **Combination Discovery:** Scans the entire Gaze file to identify all unique `(Hit_Role, Hit_AOI)` pairs (e.g., "Target_Face", "Confederate_Hand"). This ensures the final report includes columns for all AOIs, even those that are never fixated in a particular phase (value: 0).
+    4.  **Phase Loop (TOI):** Iterates over each temporal interval defined in the TOI file.
+        *   **Slicing:** Extracts the subset of Gaze samples falling within the phase boundaries (`t_start` → `t_end`).
+        *   **General Phase Metrics:**
+            *   `Gaze_Samples_Total`: Number of samples in the subset.
+            *   `Gaze_Valid_Time`: `Samples × sample_dur`.
             *   `Tracking_Ratio`: `Valid_Time / (t_end - t_start)`.
-        *   **Calcolo Metriche per AOI:** Raggruppa il subset per `Hit_Role` e `Hit_AOI`.
-            *   **Duration:** `Count * sample_dur`.
+        *   **Per-AOI Metric Computation:** Groups the subset by `Hit_Role` and `Hit_AOI`.
+            *   **Duration:** `Count × sample_dur`.
             *   **Percentage:** `Duration / Phase_Duration`.
-            *   **Latency:** `Timestamp_Primo_Hit - t_start`. Se non ci sono hit, è vuoto.
-            *   **Glances (Sguardi):** Conta quante volte lo sguardo *entra* nell'AOI.
-                *   Logica: `(Current == AOI) AND (Previous != AOI)`.
-    5.  **Formattazione Output:**
-        *   **Wide Format (Classico):** Una riga per Fase. Le metriche delle AOI sono colonne aggiunte orizzontalmente (es. `Target_Face_Dur`, `Target_Face_Perc`, `Target_Face_Lat`).
-        *   **Long Format (Tidy):** Una riga per ogni combinazione Fase-AOI. Colonne fisse: `Phase`, `Condition`, `Hit_Role`, `Hit_AOI`, `Duration`, `Percentage`, ecc.
+            *   **Latency:** `Timestamp_First_Hit - t_start`. Empty if no hits are registered.
+            *   **Glances:** Counts the number of gaze *entries* into the AOI.
+                *   Logic: `(Current == AOI) AND (Previous ≠ AOI)`.
+    5.  **Output Formatting:**
+        *   **Wide Format (Classical):** One row per Phase. AOI metrics are appended as horizontal columns (e.g., `Target_Face_Dur`, `Target_Face_Perc`, `Target_Face_Lat`).
+        *   **Long Format (Tidy):** One row per Phase–AOI combination. Fixed columns: `Phase`, `Condition`, `Hit_Role`, `Hit_AOI`, `Duration`, `Percentage`, etc.
 
-## 2. Generazione Master Report (`export_master_report`)
+## 2. Master Report Generation (`export_master_report`)
 
-Questa funzione crea un file Excel complesso contenente tutti i dati dell'esperimento.
+This function produces a comprehensive Excel file consolidating all experimental data.
 
-*   **Input:** Un dizionario di DataFrame (`data_frames_dict`) contenente Stats, Raw Data, Mapping, AOI, Identity, YOLO, TOI.
-*   **Logica:**
-    1.  Usa `xlsxwriter` come engine.
-    2.  Per ogni DataFrame nel dizionario:
-        *   Crea un foglio **Legenda** (`L - NomeFoglio`) usando un dizionario statico di descrizioni (`legends_dict`).
-        *   Crea il foglio **Dati** (`NomeFoglio`) scrivendo il DataFrame.
-        *   Applica auto-fit alla larghezza delle colonne per leggibilità.
-*   **Integrazione Dati:**
-    *   Il controller (`GazeStatsView`) tenta di caricare automaticamente i file correlati basandosi sulla convenzione dei nomi (es. se il file mapped è `P01_MAPPED.csv`, cerca `P01_AOI.csv`, `P01_video_yolo.csv`, etc.) per popolare il dizionario.
+*   **Input:** A dictionary of DataFrames (`data_frames_dict`) containing Stats, Raw Data, Mapping, AOI, Identity, YOLO, and TOI data.
+*   **Logic:**
+    1.  Uses `xlsxwriter` as the engine.
+    2.  For each DataFrame in the dictionary:
+        *   Creates a **Legend** sheet (`L - SheetName`) using a static dictionary of descriptions (`legends_dict`).
+        *   Creates the **Data** sheet (`SheetName`) by writing the DataFrame.
+        *   Applies auto-fit column widths for readability.
+*   **Data Integration:**
+    *   The controller (`GazeStatsView`) attempts to automatically load related files based on naming conventions (e.g., if the mapped file is `P01_MAPPED.csv`, it searches for `P01_AOI.csv`, `P01_video_yolo.csv`, etc.) to populate the dictionary.
 
-## 3. Interfaccia Utente: `GazeStatsView`
+## 3. User Interface: `GazeStatsView`
 
-Gestisce l'orchestrazione dei thread per non bloccare la UI durante i calcoli pesanti.
+Manages thread orchestration to prevent UI blocking during computationally intensive operations.
 
 *   **Thread Worker:**
-    1.  Esegue `run_analysis` per ottenere le statistiche.
-    2.  Se richiesto, esegue `generate_raw_dataset`.
-    3.  Se richiesto "Master Report", raccoglie tutti i file CSV/JSON ausiliari dalla cartella del progetto e chiama `export_master_report`.
-    4.  Altrimenti, salva i singoli CSV (`_STATS.csv` e opzionalmente `_RAW.csv`).
+    1.  Executes `run_analysis` to compute the statistics.
+    2.  If requested, executes `generate_raw_dataset`.
+    3.  If "Master Report" is requested, collects all auxiliary CSV/JSON files from the project directory and invokes `export_master_report`.
+    4.  Otherwise, saves the individual CSV files (`_STATS.csv` and optionally `_RAW.csv`).
 
 ---
 
-### Sommario Trasformazioni
+### Transformation Summary
 
-| Input | Processo | Output |
+| Input | Process | Output |
 | :--- | :--- | :--- |
-| **Gaze Mapped (.csv)**<br>(Timestamp, X, Y, Hit_AOI) | **Slicing Temporale**<br>Taglio basato su Start/End del TOI | **Subset Gaze**<br>(Campioni specifici per la fase) |
-| **Subset Gaze** | **Aggregazione**<br>Count, Sum(Duration), Min(Timestamp) | **Metriche AOI**<br>(Durata, Latenza, Glances) |
-| **Metriche AOI** | **Pivoting (Wide)**<br>Flattening delle chiavi AOI in colonne | **Stats Row**<br>(Phase, Cond, Face_Dur, Hand_Dur...) |
-| **Tutti i DataFrame** | **Excel Writer**<br>Merge in fogli multipli + Legende | **Master Report (.xlsx)** |
+| **Gaze Mapped (.csv)**<br>(Timestamp, X, Y, Hit_AOI) | **Temporal Slicing**<br>Segmentation based on TOI Start/End | **Gaze Subset**<br>(Phase-specific samples) |
+| **Gaze Subset** | **Aggregation**<br>Count, Sum(Duration), Min(Timestamp) | **AOI Metrics**<br>(Duration, Latency, Glances) |
+| **AOI Metrics** | **Pivoting (Wide)**<br>Flattening AOI keys into columns | **Stats Row**<br>(Phase, Cond, Face_Dur, Hand_Dur…) |
+| **All DataFrames** | **Excel Writer**<br>Merge into multiple sheets + Legends | **Master Report (.xlsx)** |
