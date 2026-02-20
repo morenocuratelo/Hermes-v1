@@ -423,6 +423,67 @@ class RegionLogic:
             for k in keys_to_remove:
                 del self.manual_overrides[k]
 
+    def find_ghost_tracks(self, frame_idx, window_frames, profile, kp_conf_thresh=0.3):
+        """
+        Search for tracks present in neighboring frames but missing in the current frame.
+        Returns a list of ghost items with a suggested box from the nearest valid frame.
+        """
+        ghosts = []
+        if not profile or 'roles' not in profile:
+            return ghosts
+
+        with self.lock:
+            # 1. Identify what is already present/generated in the current frame
+            current_aois = self.get_frame_aoi_data(frame_idx, profile, kp_conf_thresh)
+            existing_keys = set((a['track_id'], a['aoi']) for a in current_aois)
+            
+            found_ghosts = {} 
+
+            # Search range: +/- window_frames, sorted by distance (nearest first)
+            offsets = sorted(range(-window_frames, window_frames + 1), key=abs)
+            
+            for offset in offsets:
+                if offset == 0: continue
+                
+                neighbor_idx = frame_idx + offset
+                if neighbor_idx not in self.pose_data:
+                    continue
+                
+                n_poses = self.pose_data[neighbor_idx]
+                
+                for tid, kps in n_poses.items():
+                    role = self.identity_map.get(str(tid), "Unknown")
+                    if role in self.IGNORED_ROLES:
+                        continue
+                        
+                    rules = self._get_rules(profile, role)
+                    for rule in rules:
+                        aoi_name = rule['name']
+                        key = (tid, aoi_name)
+                        
+                        if key in existing_keys: continue
+                        if key in found_ghosts: continue
+                            
+                        # Try to calculate box in neighbor frame to use as suggestion
+                        shape = self.calculate_shape(kps, rule, kp_conf_thresh)
+                        if shape:
+                            found_ghosts[key] = {
+                                "box": shape["box"],
+                                "color": (128, 128, 128), # Grey for ghost
+                                "label": f"{role}:{aoi_name} (Ghost)",
+                                "track_id": tid,
+                                "role": role,
+                                "aoi": aoi_name,
+                                "corrected": False,
+                                "shape_type": shape.get("shape_type", "box"),
+                                "is_ghost": True,
+                                "source_frame": neighbor_idx
+                            }
+            
+            ghosts = list(found_ghosts.values())
+            ghosts.sort(key=lambda x: x['track_id'])
+            return ghosts
+
     def get_frame_aoi_data(self, frame_idx, profile, kp_conf_thresh=0.3):
         """
         Return all AOIs for one frame with manual overrides applied.
@@ -442,45 +503,80 @@ class RegionLogic:
                 k: v for k, v in self.manual_overrides.items() if k[0] == int(frame_idx)
             }
 
-        if not frame_poses:
-            return items
+        processed_override_keys = set()
 
-        for tid, kps in frame_poses.items():
-            role = self.identity_map.get(str(tid), "Unknown")
-            if role in self.IGNORED_ROLES:
-                continue
-
-            rules = self._get_rules(profile, role)
-            for rule in rules:
-                base_shape = self.calculate_shape(kps, rule, kp_conf_thresh)
-                if not base_shape:
+        # 1. Process existing poses
+        if frame_poses:
+            for tid, kps in frame_poses.items():
+                role = self.identity_map.get(str(tid), "Unknown")
+                if role in self.IGNORED_ROLES:
                     continue
 
-                key = self._override_key(frame_idx, tid, role, rule['name'])
-                if key in frame_overrides:
-                    shape = self._shape_from_box(
-                        base_shape.get("shape_type", "box"),
-                        frame_overrides[key],
-                        base_shape=base_shape,
-                    )
-                    corrected = True
-                else:
-                    shape = base_shape
-                    corrected = False
+                rules = self._get_rules(profile, role)
+                for rule in rules:
+                    base_shape = self.calculate_shape(kps, rule, kp_conf_thresh)
+                    
+                    key = self._override_key(frame_idx, tid, role, rule['name'])
+                    
+                    if key in frame_overrides:
+                        # Override exists: use it regardless of base_shape validity
+                        shape = self._shape_from_box(
+                            base_shape.get("shape_type", "box") if base_shape else rule.get("shape", "box"),
+                            frame_overrides[key],
+                            base_shape=base_shape,
+                        )
+                        corrected = True
+                        processed_override_keys.add(key)
+                    elif base_shape:
+                        # No override, use calculated shape
+                        shape = base_shape
+                        corrected = False
+                    else:
+                        # No override and calculation failed -> Skip
+                        continue
 
-                row = {
-                    "frame": int(frame_idx),
-                    "track_id": int(tid),
-                    "role": role,
-                    "aoi": rule['name'],
-                    "shape_type": shape.get("shape_type", "box"),
-                    "box": shape["box"],
-                    "corrected": corrected,
-                }
-                for extra_key in ("points", "cx", "cy", "radius", "rx", "ry", "angle"):
-                    if extra_key in shape:
-                        row[extra_key] = shape[extra_key]
-                items.append(row)
+                    row = {
+                        "frame": int(frame_idx),
+                        "track_id": int(tid),
+                        "role": role,
+                        "aoi": rule['name'],
+                        "shape_type": shape.get("shape_type", "box"),
+                        "box": shape["box"],
+                        "corrected": corrected,
+                    }
+                    for extra_key in ("points", "cx", "cy", "radius", "rx", "ry", "angle"):
+                        if extra_key in shape:
+                            row[extra_key] = shape[extra_key]
+                    items.append(row)
+
+        # 2. Process overrides for missing tracks (Ghost Tracks that became real overrides)
+        for key, box in frame_overrides.items():
+            if key in processed_override_keys:
+                continue
+            
+            _, tid, role, aoi_name = key
+            
+            # Infer shape type from profile since we don't have base_shape
+            rules = self._get_rules(profile, role)
+            target_rule = next((r for r in rules if r['name'] == aoi_name), None)
+            shape_type = target_rule.get('shape', 'box') if target_rule else 'box'
+            
+            shape = self._shape_from_box(shape_type, box)
+            
+            row = {
+                "frame": int(frame_idx),
+                "track_id": int(tid),
+                "role": role,
+                "aoi": aoi_name,
+                "shape_type": shape.get("shape_type", "box"),
+                "box": shape["box"],
+                "corrected": True,
+            }
+            for extra_key in ("points", "cx", "cy", "radius", "rx", "ry", "angle"):
+                if extra_key in shape:
+                    row[extra_key] = shape[extra_key]
+            items.append(row)
+            
         return items
 
     # ── Render Data (for View) ──────────────────────────────────
@@ -1644,18 +1740,25 @@ class RegionView:
         self.cb_frame_aoi.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(2, 6))
         self.cb_frame_aoi.bind("<<ComboboxSelected>>", self.on_frame_aoi_select)
 
-        tk.Label(lf, text="x1").grid(row=3, column=0, sticky="w")
-        tk.Entry(lf, textvariable=self.edit_x1, width=8).grid(row=3, column=1, sticky="w")
-        tk.Label(lf, text="y1").grid(row=3, column=2, sticky="w")
-        tk.Entry(lf, textvariable=self.edit_y1, width=8).grid(row=3, column=3, sticky="w")
+        f_add = tk.Frame(lf)
+        f_add.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(0, 6))
+        tk.Label(f_add, text="Force Add:").pack(side=tk.LEFT)
+        self.cb_force_add = ttk.Combobox(f_add, state="readonly")
+        self.cb_force_add.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        tk.Button(f_add, text="➕", width=3, command=self.force_add_new_aoi).pack(side=tk.LEFT)
 
-        tk.Label(lf, text="x2").grid(row=4, column=0, sticky="w")
-        tk.Entry(lf, textvariable=self.edit_x2, width=8).grid(row=4, column=1, sticky="w")
-        tk.Label(lf, text="y2").grid(row=4, column=2, sticky="w")
-        tk.Entry(lf, textvariable=self.edit_y2, width=8).grid(row=4, column=3, sticky="w")
+        tk.Label(lf, text="x1").grid(row=4, column=0, sticky="w")
+        tk.Entry(lf, textvariable=self.edit_x1, width=8).grid(row=4, column=1, sticky="w")
+        tk.Label(lf, text="y1").grid(row=4, column=2, sticky="w")
+        tk.Entry(lf, textvariable=self.edit_y1, width=8).grid(row=4, column=3, sticky="w")
+
+        tk.Label(lf, text="x2").grid(row=5, column=0, sticky="w")
+        tk.Entry(lf, textvariable=self.edit_x2, width=8).grid(row=5, column=1, sticky="w")
+        tk.Label(lf, text="y2").grid(row=5, column=2, sticky="w")
+        tk.Entry(lf, textvariable=self.edit_y2, width=8).grid(row=5, column=3, sticky="w")
 
         btn_row = tk.Frame(lf)
-        btn_row.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        btn_row.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(8, 0))
         tk.Button(btn_row, text="Apply to Frame", bg="#1976d2", fg="white",
                   command=self.apply_selected_override).pack(side=tk.LEFT, padx=2)
         tk.Button(btn_row, text="Clear Selected", command=self.clear_selected_override).pack(side=tk.LEFT, padx=2)
@@ -1667,11 +1770,60 @@ class RegionView:
         lf.grid_columnconfigure(3, weight=1)
         self._update_manual_editor_visibility()
 
+    def _update_force_add_list(self):
+        self.force_add_lookup = {}
+        values = []
+        prof = self._effective_profile_for_frame(self.current_frame)
+        
+        if prof and 'roles' in prof and self.logic.identity_map:
+            sorted_ids = sorted(self.logic.identity_map.items(), key=lambda x: int(x[0]))
+            for tid_str, role in sorted_ids:
+                if role in self.logic.IGNORED_ROLES:
+                    continue
+                rules = self.logic._get_rules(prof, role)
+                for rule in rules:
+                    aoi_name = rule['name']
+                    label = f"ID {tid_str} | {role} | {aoi_name}"
+                    values.append(label)
+                    self.force_add_lookup[label] = {
+                        "track_id": int(tid_str),
+                        "role": role,
+                        "aoi": aoi_name,
+                        "shape_type": rule.get('shape', 'box')
+                    }
+                    
+        self.cb_force_add['values'] = values
+        if values:
+            self.cb_force_add.current(0)
+
+    def force_add_new_aoi(self):
+        sel = self.cb_force_add.get()
+        if not sel or not hasattr(self, 'force_add_lookup') or sel not in self.force_add_lookup:
+            return
+
+        data = self.force_add_lookup[sel]
+        
+        w, h = 100, 100
+        cx = self._orig_w // 2 if hasattr(self, '_orig_w') and self._orig_w > 0 else 320
+        cy = self._orig_h // 2 if hasattr(self, '_orig_h') and self._orig_h > 0 else 240
+        box = (cx - w // 2, cy - h // 2, cx + w // 2, cy + h // 2)
+
+        before = self._snapshot_edit_state()
+        self._apply_manual_box_with_scope(data, box)
+        self.show_frame()
+        self._commit_action(f"Force add {data['role']}:{data['aoi']}", before)
+
+        key = f"ID {data['track_id']} | {data['role']} | {data['aoi']} [{data['shape_type']}]"
+        if key in self.frame_aoi_lookup:
+            self.selected_frame_aoi.set(key)
+            self._set_box_vars(box)
+
     def _update_manual_editor_visibility(self):
         if not hasattr(self, "frame_correction_lf") or not hasattr(self, "lbl_manual_collapsed"):
             return
 
         if self.manual_mode:
+            self._update_force_add_list()
             if self.lbl_manual_collapsed.winfo_manager() == "pack":
                 self.lbl_manual_collapsed.pack_forget()
             if self.frame_correction_lf.winfo_manager() != "pack":
@@ -1905,6 +2057,19 @@ class RegionView:
             key = self._aoi_key(item)
             self.frame_aoi_lookup[key] = item
             values.append(key)
+
+        # --- GHOST TRACKS LOGIC ---
+        if self.manual_mode:
+            # Look +/- 1 second (approx 30 frames)
+            window = int(self.fps) if self.fps > 0 else 30
+            prof = self._effective_profile_for_frame(self.current_frame)
+            ghosts = self.logic.find_ghost_tracks(self.current_frame, window, prof, self.kp_conf_thresh.get())
+            
+            for g in ghosts:
+                key = self._aoi_key(g) + " [GHOST]"
+                self.frame_aoi_lookup[key] = g
+                values.append(key)
+        # --------------------------
 
         self.cb_frame_aoi["values"] = values
 
