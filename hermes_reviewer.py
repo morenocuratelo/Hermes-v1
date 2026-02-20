@@ -4,7 +4,6 @@ import cv2
 import pandas as pd
 import bisect
 import os
-import math
 from PIL import Image, ImageTk
 
 class TimelineWidget(tk.Canvas):
@@ -93,9 +92,11 @@ class ReviewerLogic:
         self.gaze_y = []
 
     def load_video(self, path):
-        if not os.path.exists(path): return False
+        if not os.path.exists(path):
+            return False
         self.cap = cv2.VideoCapture(path)
-        if not self.cap.isOpened(): return False
+        if not self.cap.isOpened():
+            return False
             
         self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -103,7 +104,8 @@ class ReviewerLogic:
         return True
 
     def load_tois(self, path):
-        if not os.path.exists(path): return False
+        if not os.path.exists(path):
+            return False
         try:
             sep = '\t' if path.endswith('.tsv') or path.endswith('.txt') else ','
             self.df_tois = pd.read_csv(path, sep=sep)
@@ -114,7 +116,8 @@ class ReviewerLogic:
             return False
 
     def load_gaze(self, path):
-        if not os.path.exists(path): return False
+        if not os.path.exists(path):
+            return False
         try:
             df = pd.read_csv(path)
             req = ['Timestamp', 'Gaze_X', 'Gaze_Y']
@@ -133,7 +136,8 @@ class ReviewerLogic:
             return False
 
     def get_frame_image(self):
-        if not self.cap: return False, None
+        if not self.cap:
+            return False, None
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
         return self.cap.read()
 
@@ -290,7 +294,8 @@ class ReviewerView:
         self.parent.after(delay, self.play_loop)
 
     def seek_seconds(self, sec):
-        if not self.logic.cap: return
+        if not self.logic.cap:
+            return
         self.logic.current_frame = int(sec * self.logic.fps)
         self.logic.current_frame = max(0, min(self.logic.total_frames - 1, self.logic.current_frame))
         self.show_frame()
@@ -299,7 +304,8 @@ class ReviewerView:
         self.seek_seconds((self.logic.current_frame / self.logic.fps) + delta)
 
     def seek_relative_frames(self, delta):
-        if not self.logic.cap: return
+        if not self.logic.cap:
+            return
         self.logic.current_frame = max(0, min(self.logic.total_frames - 1, self.logic.current_frame + delta))
         self.show_frame()
 
@@ -322,7 +328,8 @@ class ReviewerView:
 
     def show_frame(self):
         ret, frame = self.logic.get_frame_image()
-        if not ret or frame is None: return
+        if not ret or frame is None:
+            return
         
         curr_sec = self.logic.current_frame / self.logic.fps
         self.timeline.update_cursor(curr_sec)

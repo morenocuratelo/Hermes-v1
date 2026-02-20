@@ -95,7 +95,8 @@ class ResultsWriter(threading.Thread):
         """Aggiunge un item alla coda. Blocca se la coda è piena (backpressure)."""
         # FIX: Loop con timeout per evitare deadlock se il writer crasha o viene stoppato
         while not self.stop_event.is_set():
-            if self.error: raise self.error
+            if self.error:
+                raise self.error
             try:
                 self.queue.put(item, timeout=0.1)
                 return
@@ -106,7 +107,8 @@ class ResultsWriter(threading.Thread):
         """Segnala al thread di finire di scrivere e chiudere."""
         self.stop_event.set()
         self.join()
-        if self.error: raise self.error
+        if self.error:
+            raise self.error
 
     def run(self):
         try:
@@ -448,7 +450,8 @@ class PoseEstimatorLogic:
         try:
             for i, result in enumerate(results):
                 if stop_event and stop_event.is_set():
-                    if on_log: on_log("🛑 Analysis interrupted by user.")
+                    if on_log:
+                        on_log("🛑 Analysis interrupted by user.")
                     break
 
                 # Normalize to numpy (handles CPU/GPU and Tensor/ndarray differences)

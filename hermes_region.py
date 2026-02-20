@@ -445,7 +445,8 @@ class RegionLogic:
             offsets = sorted(range(-window_frames, window_frames + 1), key=abs)
             
             for offset in offsets:
-                if offset == 0: continue
+                if offset == 0:
+                    continue
                 
                 neighbor_idx = frame_idx + offset
                 if neighbor_idx not in self.pose_data:
@@ -463,8 +464,10 @@ class RegionLogic:
                         aoi_name = rule['name']
                         key = (tid, aoi_name)
                         
-                        if key in existing_keys: continue
-                        if key in found_ghosts: continue
+                        if key in existing_keys:
+                            continue
+                        if key in found_ghosts:
+                            continue
                             
                         # Try to calculate box in neighbor frame to use as suggestion
                         shape = self.calculate_shape(kps, rule, kp_conf_thresh)

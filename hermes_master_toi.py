@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 import scipy.io as sio
 import gzip
+import csv
 
 # --- GESTIONE PROFILI ---
 class ProfileManager:
@@ -711,6 +712,7 @@ class DataCropper:
         """
         Legge il JSON.GZ di YOLO e il file TOI.
         Crea un nuovo file .json.gz contenente solo i frame dal primo TOI in poi.
+        Genera anche un CSV appiattito (long-format) corrispondente.
         """
         try:
             print(f"✂️ Starting RAW pruning on: {os.path.basename(json_gz_path)}")
@@ -733,6 +735,18 @@ class DataCropper:
             path_parts = os.path.splitext(os.path.splitext(json_gz_path)[0]) # Rimuove .gz poi .json
             # Ricostruisce nome: base + suffix + .json.gz
             new_path = f"{path_parts[0]}{output_suffix}.json.gz"
+            csv_path = f"{path_parts[0]}{output_suffix}.csv"
+            
+            # Header CSV
+            kp_names = [
+                "Nose", "L_Eye", "R_Eye", "L_Ear", "R_Ear", 
+                "L_Shoulder", "R_Shoulder", "L_Elbow", "R_Elbow", 
+                "L_Wrist", "R_Wrist", "L_Hip", "R_Hip", 
+                "L_Knee", "R_Knee", "L_Ankle", "R_Ankle"
+            ]
+            header = ["Frame", "Timestamp", "TrackID", "Conf", "Box_X1", "Box_Y1", "Box_X2", "Box_Y2"]
+            for kp in kp_names:
+                header.extend([f"{kp}_X", f"{kp}_Y", f"{kp}_C"])
             
             kept_frames = 0
             dropped_frames = 0
@@ -740,7 +754,11 @@ class DataCropper:
             # 3. Streaming Read/Write (Memoria efficiente)
             print("⏳ Processing (Streaming)...")
             with gzip.open(json_gz_path, 'rt', encoding='utf-8') as f_in, \
-                 gzip.open(new_path, 'wt', encoding='utf-8') as f_out:
+                 gzip.open(new_path, 'wt', encoding='utf-8') as f_out, \
+                 open(csv_path, 'w', newline='', encoding='utf-8') as f_csv:
+                
+                writer = csv.writer(f_csv)
+                writer.writerow(header)
                 
                 for line in f_in:
                     try:
@@ -754,6 +772,22 @@ class DataCropper:
                             # Scrive la riga originale intatta (veloce)
                             f_out.write(line)
                             kept_frames += 1
+                            
+                            # Scrive le righe nel CSV (Long Format)
+                            f_idx = frame.get('f_idx', -1)
+                            for det in frame.get('det', []):
+                                row = [f_idx, ts, det.get('track_id', -1), det.get('conf', 0)]
+                                b = det.get('box', {})
+                                row.extend([b.get('x1',0), b.get('y1',0), b.get('x2',0), b.get('y2',0)])
+                                kps = det.get('keypoints', [])
+                                if not kps:
+                                    row.extend([0] * (17 * 3))
+                                else:
+                                    for point in kps:
+                                        row.extend(point) 
+                                        if len(point) < 3:
+                                            row.append(0) 
+                                writer.writerow(row)
                         else:
                             dropped_frames += 1
                             
@@ -764,6 +798,7 @@ class DataCropper:
             print(f"   Frames removed:   {dropped_frames}")
             print(f"   Frames kept: {kept_frames}")
             print(f"   Saved in:      {os.path.basename(new_path)}")
+            print(f"   Saved CSV in:  {os.path.basename(csv_path)}")
             
             return new_path
 

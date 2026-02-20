@@ -198,7 +198,8 @@ class ParticipantWizard:
 
     def _browse(self, var, ft):
         f = filedialog.askopenfilename(filetypes=[("Files", ft)])
-        if f: var.set(f)
+        if f:
+            var.set(f)
 
     def _update_preview(self):
         pid = f"{self.var_exp.get()}_{self.var_group.get()}_{self.var_cond.get()}_{self.var_num.get()}_{self.var_init.get()}"
@@ -206,7 +207,8 @@ class ParticipantWizard:
 
     def create_participant(self):
         pid = self.var_preview.get()
-        if not pid: return
+        if not pid:
+            return
 
         if pid in self.context.participants:
             messagebox.showerror("Error", f"Participant {pid} already exists.")

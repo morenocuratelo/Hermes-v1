@@ -274,6 +274,46 @@ class StatsLogic:
         
         return df_results[base_cols + metric_cols]
 
+    def export_master_report(self, output_path, data_frames_dict):
+        """
+        Genera il Master Report Excel alternando fogli dati e fogli legenda.
+        Richiede 'xlsxwriter' installato (pip install xlsxwriter).
+        """
+        # Definizione statica delle legende per garantire la coerenza formale con il template
+        legends_dict = {
+            "Stats_Summary": pd.DataFrame({
+                "Column": ["Gaze_Samples_Total", "Gaze_Valid_Time", "Tracking_Ratio"],
+                "Description": ["Total gaze samples in phase", "Valid gaze duration (sec)", "Ratio of tracked time vs phase duration"]
+            }),
+            # NOTA: Completa i dizionari sottostanti con il contenuto esatto dei file "L - ..." che possiedi
+            "Stats_Raw": pd.DataFrame({"Column": ["Timestamp", "Phase", "Condition"], "Description": ["...", "...", "..."]}),
+            "Mapping": pd.DataFrame({"Column": ["...", "..."], "Description": ["...", "..."]}),
+            "AOI": pd.DataFrame({"Column": ["...", "..."], "Description": ["...", "..."]}),
+            "Identity": pd.DataFrame({"Column": ["...", "..."], "Description": ["...", "..."]}),
+            "YOLO_Cropped": pd.DataFrame({"Column": ["...", "..."], "Description": ["...", "..."]}),
+            "TOI": pd.DataFrame({"Column": ["...", "..."], "Description": ["...", "..."]}),
+            "YOLO": pd.DataFrame({"Column": ["...", "..."], "Description": ["...", "..."]})
+        }
+
+        try:
+            with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+                for sheet_name, df in data_frames_dict.items():
+                    if df is not None:
+                        # 1. Scrivi il foglio della Legenda (L - NomeFoglio)
+                        legend_sheet_name = f"L - {sheet_name}"
+                        if sheet_name in legends_dict:
+                            legends_dict[sheet_name].to_excel(writer, sheet_name=legend_sheet_name, index=False)
+                        
+                        # 2. Scrivi il foglio dei Dati
+                        df.to_excel(writer, sheet_name=sheet_name, index=False)
+                        
+                        # (Opzionale) Auto-fit delle colonne per leggibilità
+                        worksheet = writer.sheets[sheet_name]
+                        for i, col in enumerate(df.columns):
+                            column_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
+                            worksheet.set_column(i, i, column_len)
+        except Exception as e:
+            raise ValueError(f"Error generating Master Excel: {e}")
 
 # ═══════════════════════════════════════════════════════════════════
 # VIEW — UI Logic
@@ -293,6 +333,7 @@ class GazeStatsView:
         self.gaze_freq = tk.DoubleVar(value=0.0) # 0 = Auto-detect
         self.var_raw = tk.BooleanVar(value=False)
         self.var_long = tk.BooleanVar(value=False)
+        self.var_master = tk.BooleanVar(value=False) # NUOVA VARIABILE per esportazione Master Report
         
         self.status_var = tk.StringVar(value="Ready.")
         
@@ -340,6 +381,7 @@ class GazeStatsView:
         f_chk.pack(fill=tk.X, pady=5)
         tk.Checkbutton(f_chk, text="Export Raw Data (Sample-level with Phase info)", variable=self.var_raw, bg="white").pack(anchor="w")
         tk.Checkbutton(f_chk, text="Use Long Format (Tidy Data) for Stats Report", variable=self.var_long, bg="white").pack(anchor="w")
+        tk.Checkbutton(f_chk, text="Generate Full Excel MASTER REPORT (Requires all source files in same folder)", variable=self.var_master, fg="darkred", bg="white").pack(anchor="w", pady=(5,0))
 
         # 3. Action
         self.btn_run = tk.Button(main, text="GENERATE FULL REPORT", bg="#4CAF50", fg="white", 
@@ -404,15 +446,46 @@ class GazeStatsView:
                     )
                 
                 if df_stats is not None:
-                    # Save Logic
-                    default_name = mapped.replace("_MAPPED.csv", "_FINAL_STATS.csv")
-                    if default_name == mapped:
-                        default_name += "_stats.csv"
-                    
-                    self.parent.after(0, lambda: self._save_results(df_stats, df_raw, default_name))
-                else:
-                    self.parent.after(0, lambda: messagebox.showwarning("Empty", "No results generated. Check time alignment between files."))
-                    self.parent.after(0, self._reset_ui)
+                    if self.var_master.get():
+                        # --- LOGICA MASTER REPORT ---
+                        self.parent.after(0, lambda: self.status_var.set("Compiling Master Report..."))
+                        base_dir = os.path.dirname(mapped)
+                        # Assumiamo che il file mapped si chiami es: BWWW_TD_Inv_11_GC_MAPPED.csv
+                        # Ricaviamo il prefisso rimuovendo la parte finale conosciuta
+                        prefix = os.path.basename(mapped).replace("_MAPPED.csv", "").replace("_gaze_MAPPED.csv", "")
+                        
+                        # Caricamento dinamico dei file extra (con fallback a None se non trovati)
+                        dfs = {
+                            "Stats_Summary": df_stats,
+                            "Stats_Raw": df_raw if df_raw is not None else (self.logic.generate_raw_dataset(mapped, toi) if not self.var_raw.get() else None),
+                            "Mapping": pd.read_csv(mapped) if os.path.exists(mapped) else None,
+                            "TOI": pd.read_csv(toi, sep='\t') if os.path.exists(toi) else None,
+                        }
+
+                        # Auto-discovery degli altri file basati sul prefisso
+                        aoi_path = os.path.join(base_dir, f"{prefix}_AOI.csv")
+                        identity_path = os.path.join(base_dir, f"{prefix}_video_yolo_CROPPED_identity.json")
+                        yolo_cropped_path = os.path.join(base_dir, f"{prefix}_video_yolo_CROPPED.csv")
+                        
+                        dfs["AOI"] = pd.read_csv(aoi_path) if os.path.exists(aoi_path) else None
+                        dfs["Identity"] = pd.read_json(identity_path) if os.path.exists(identity_path) else None
+                        
+                        # Caricamento del file YOLO Cropped (ora in formato CSV appiattito)
+                        dfs["YOLO_Cropped"] = pd.read_csv(yolo_cropped_path) if os.path.exists(yolo_cropped_path) else None
+                        
+                        # Il file YOLO raw base (generato automaticamente come CSV)
+                        yolo_raw_path = os.path.join(base_dir, f"{prefix}_video_yolo.csv")
+                        dfs["YOLO"] = pd.read_csv(yolo_raw_path) if os.path.exists(yolo_raw_path) else None
+
+                        default_excel_name = os.path.join(base_dir, f"{prefix}_MASTER_REPORT.xlsx")
+                        self.parent.after(0, lambda: self._save_master_results(dfs, default_excel_name))
+
+                    else:
+                        # --- LOGICA STANDARD CSV ---
+                        default_name = mapped.replace("_MAPPED.csv", "_FINAL_STATS.csv")
+                        if default_name == mapped:
+                            default_name += "_stats.csv"
+                        self.parent.after(0, lambda: self._save_results(df_stats, df_raw, default_name))
 
             except Exception as e:
                 import traceback
@@ -449,6 +522,22 @@ class GazeStatsView:
                 messagebox.showinfo("Success", msg)
             except Exception as e:
                 messagebox.showerror("Save Error", str(e))
+        
+        self._reset_ui()
+
+    def _save_master_results(self, dfs_dict, default_path):
+        self.progress.stop()
+        out = filedialog.asksaveasfilename(
+            initialfile=os.path.basename(default_path),
+            defaultextension=".xlsx",
+            filetypes=[("Excel Master Report", "*.xlsx")]
+        )
+        if out:
+            try:
+                self.logic.export_master_report(out, dfs_dict)
+                messagebox.showinfo("Success", f"Master Report saved successfully.\nPath: {out}")
+            except Exception as e:
+                messagebox.showerror("Save Error", f"Failed to save Master Report: {str(e)}")
         
         self._reset_ui()
 
