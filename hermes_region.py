@@ -5,6 +5,7 @@ import json
 import gzip
 import os
 import math
+import bisect
 import copy
 import threading
 import pandas as pd
@@ -874,6 +875,8 @@ class RegionView:
         self.last_manual_save_ts = None
         self.session_state_path = None
         self.current_toi_idx = None
+        self.ghost_window_var = tk.IntVar(value=30)
+        self.force_add_mode_var = tk.StringVar(value="Auto")
 
         # Load first available profile
         profs = self.pm.list_profiles()
@@ -1734,7 +1737,8 @@ class RegionView:
             text=(
                 "Tip: turn Manual Correction ON, then click an AOI and drag a green corner "
                 "(or drag inside to move). Use 'Draw' in Force Add to create from video: "
-                "from any corner, or from center for circles."
+                "from any corner, or from center for circles. Use 'Linear Interp' to fill "
+                "missing AOI frames from neighboring frames."
             ),
             fg="gray",
             font=("Arial", 8),
@@ -1757,20 +1761,29 @@ class RegionView:
         tk.Button(f_add, text="➕", width=3, command=self.force_add_new_aoi).pack(side=tk.LEFT)
         tk.Button(f_add, text="Draw", width=5, command=self.force_add_draw_on_video).pack(side=tk.LEFT, padx=(4, 0))
 
-        tk.Label(lf, text="x1").grid(row=4, column=0, sticky="w")
-        tk.Entry(lf, textvariable=self.edit_x1, width=8).grid(row=4, column=1, sticky="w")
-        tk.Label(lf, text="y1").grid(row=4, column=2, sticky="w")
-        tk.Entry(lf, textvariable=self.edit_y1, width=8).grid(row=4, column=3, sticky="w")
+        f_opts = tk.Frame(lf)
+        f_opts.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(0, 6))
+        tk.Label(f_opts, text="Ghost Win:").pack(side=tk.LEFT)
+        tk.Spinbox(f_opts, from_=1, to=300, textvariable=self.ghost_window_var, width=4, command=self.show_frame).pack(side=tk.LEFT, padx=2)
+        tk.Label(f_opts, text="Seed:").pack(side=tk.LEFT, padx=(10, 0))
+        ttk.Combobox(f_opts, textvariable=self.force_add_mode_var, values=["Auto", "Ghost Only", "Center Only"], state="readonly", width=10).pack(side=tk.LEFT, padx=2)
 
-        tk.Label(lf, text="x2").grid(row=5, column=0, sticky="w")
-        tk.Entry(lf, textvariable=self.edit_x2, width=8).grid(row=5, column=1, sticky="w")
-        tk.Label(lf, text="y2").grid(row=5, column=2, sticky="w")
-        tk.Entry(lf, textvariable=self.edit_y2, width=8).grid(row=5, column=3, sticky="w")
+        tk.Label(lf, text="x1").grid(row=5, column=0, sticky="w")
+        tk.Entry(lf, textvariable=self.edit_x1, width=8).grid(row=5, column=1, sticky="w")
+        tk.Label(lf, text="y1").grid(row=5, column=2, sticky="w")
+        tk.Entry(lf, textvariable=self.edit_y1, width=8).grid(row=5, column=3, sticky="w")
+
+        tk.Label(lf, text="x2").grid(row=6, column=0, sticky="w")
+        tk.Entry(lf, textvariable=self.edit_x2, width=8).grid(row=6, column=1, sticky="w")
+        tk.Label(lf, text="y2").grid(row=6, column=2, sticky="w")
+        tk.Entry(lf, textvariable=self.edit_y2, width=8).grid(row=6, column=3, sticky="w")
 
         btn_row = tk.Frame(lf)
-        btn_row.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        btn_row.grid(row=7, column=0, columnspan=4, sticky="ew", pady=(8, 0))
         tk.Button(btn_row, text="Apply to Frame", bg="#1976d2", fg="white",
                   command=self.apply_selected_override).pack(side=tk.LEFT, padx=2)
+        tk.Button(btn_row, text="Linear Interp", bg="#455a64", fg="white",
+                  command=self.interpolate_selected_linear).pack(side=tk.LEFT, padx=2)
         tk.Button(btn_row, text="Clear Selected", command=self.clear_selected_override).pack(side=tk.LEFT, padx=2)
         tk.Button(btn_row, text="Clear Frame", command=self.clear_frame_overrides).pack(side=tk.LEFT, padx=2)
 
@@ -1833,22 +1846,72 @@ class RegionView:
             return True
         return False
 
+    def _find_ghost_seed_for_identity(self, track_id, role, aoi):
+        track_id = int(track_id)
+        role = str(role)
+        aoi = str(aoi)
+
+        # Prefer ghosts already shown in the current frame UI.
+        for key, item in self.frame_aoi_lookup.items():
+            if not key.endswith("[GHOST]"):
+                continue
+            if int(item.get("track_id", -1)) != track_id:
+                continue
+            if str(item.get("role", "")) != role:
+                continue
+            if str(item.get("aoi", "")) != aoi:
+                continue
+            return self.logic._sanitize_box(item["box"]), item.get("source_frame")
+
+        prof = self._effective_profile_for_frame(self.current_frame)
+        window = self.ghost_window_var.get()
+        ghosts = self.logic.find_ghost_tracks(
+            self.current_frame, window, prof, self.kp_conf_thresh.get()
+        )
+        hit = self._find_item_by_identity(ghosts, track_id, role, aoi)
+        if hit:
+            return self.logic._sanitize_box(hit["box"]), hit.get("source_frame")
+        return None, None
+
     def force_add_new_aoi(self):
         data = self._selected_force_add_data()
         if not data:
             return
-        
-        w, h = 100, 100
-        cx = self._orig_w // 2 if hasattr(self, '_orig_w') and self._orig_w > 0 else 320
-        cy = self._orig_h // 2 if hasattr(self, '_orig_h') and self._orig_h > 0 else 240
-        box = (cx - w // 2, cy - h // 2, cx + w // 2, cy + h // 2)
+
+        mode = self.force_add_mode_var.get()
+        box = None
+        source_frame = None
+
+        if mode in ("Auto", "Ghost Only"):
+            box, source_frame = self._find_ghost_seed_for_identity(
+                data["track_id"], data["role"], data["aoi"]
+            )
+
+        if box is None:
+            if mode == "Ghost Only":
+                messagebox.showinfo("Force Add", "No ghost track found in range (Ghost Only mode).")
+                return
+            w, h = 100, 100
+            cx = self._orig_w // 2 if hasattr(self, '_orig_w') and self._orig_w > 0 else 320
+            cy = self._orig_h // 2 if hasattr(self, '_orig_h') and self._orig_h > 0 else 240
+            box = (cx - w // 2, cy - h // 2, cx + w // 2, cy + h // 2)
+            action_label = f"Force add {data['role']}:{data['aoi']} (center seed)"
+        else:
+            action_label = f"Force add {data['role']}:{data['aoi']} (ghost seed)"
 
         before = self._snapshot_edit_state()
         self._apply_manual_box_with_scope(data, box)
         self.show_frame()
-        self._commit_action(f"Force add {data['role']}:{data['aoi']}", before)
+        self._commit_action(action_label, before)
         self.pending_force_add = None
         self._select_item_by_identity(data["track_id"], data["role"], data["aoi"], box_hint=box)
+        if source_frame is not None:
+            self.lbl_player.config(
+                text=(
+                    f"Force Add seeded from Ghost at frame {int(source_frame)} "
+                    f"for {data['role']}:{data['aoi']}."
+                )
+            )
 
     def force_add_draw_on_video(self):
         if not self.manual_mode:
@@ -2070,6 +2133,145 @@ class RegionView:
         self.show_frame()
         self._commit_action("Apply manual override", before)
 
+    @staticmethod
+    def _find_item_by_identity(items, track_id, role, aoi):
+        for row in items:
+            if int(row.get("track_id", -1)) != int(track_id):
+                continue
+            if str(row.get("role", "")) != str(role):
+                continue
+            if str(row.get("aoi", "")) != str(aoi):
+                continue
+            return row
+        return None
+
+    def _interpolation_scope_bounds(self):
+        if self.total_frames <= 0:
+            return None, None, []
+
+        scope = self.edit_scope_var.get()
+        if scope == "Whole Video":
+            return 0, self.total_frames - 1, list(range(self.total_frames))
+
+        if scope == "Current TOI":
+            row, _idx = self._active_toi_for_frame(self.current_frame)
+            rng = self._toi_frame_range(row)
+            if rng:
+                return rng[0], rng[1], list(range(rng[0], rng[1] + 1))
+            return self.current_frame, self.current_frame, [self.current_frame]
+
+        # Scope == "Frame": interpolate only current frame, using anchors from whole video.
+        return 0, self.total_frames - 1, [self.current_frame]
+
+    def _collect_known_boxes_for_identity(self, track_id, role, aoi, start_frame, end_frame):
+        if start_frame is None or end_frame is None:
+            return {}
+
+        with self.logic.lock:
+            pose_frames = {
+                int(f_idx)
+                for f_idx in self.logic.pose_data.keys()
+                if int(start_frame) <= int(f_idx) <= int(end_frame)
+            }
+            manual_frames = {
+                int(k[0])
+                for k in self.logic.manual_overrides.keys()
+                if int(start_frame) <= int(k[0]) <= int(end_frame)
+                and int(k[1]) == int(track_id)
+                and str(k[2]) == str(role)
+                and str(k[3]) == str(aoi)
+            }
+
+        candidate_frames = sorted(pose_frames.union(manual_frames))
+        known = {}
+        for f_idx in candidate_frames:
+            prof = self._effective_profile_for_frame(f_idx)
+            rows = self.logic.get_frame_aoi_data(f_idx, prof, self.kp_conf_thresh.get())
+            hit = self._find_item_by_identity(rows, track_id, role, aoi)
+            if hit:
+                known[int(f_idx)] = self.logic._sanitize_box(hit["box"])
+        return known
+
+    @staticmethod
+    def _lerp_box(box_a, box_b, t):
+        return tuple(
+            int(round(float(a) + (float(b) - float(a)) * float(t)))
+            for a, b in zip(box_a, box_b)
+        )
+
+    def interpolate_selected_linear(self):
+        if not self.manual_mode:
+            messagebox.showinfo("Manual Mode", "Enable Manual Correction mode to run interpolation.")
+            return
+        item = self._current_selected_aoi_item()
+        if not item:
+            messagebox.showwarning("No AOI", "Select an AOI in the current frame first.")
+            return
+
+        track_id = int(item["track_id"])
+        role = str(item["role"])
+        aoi = str(item["aoi"])
+        start_frame, end_frame, apply_frames = self._interpolation_scope_bounds()
+        if not apply_frames:
+            messagebox.showwarning("Interpolation", "No valid frame range for interpolation.")
+            return
+
+        known_boxes = self._collect_known_boxes_for_identity(
+            track_id, role, aoi, start_frame, end_frame
+        )
+        anchor_frames = sorted(known_boxes.keys())
+        if len(anchor_frames) < 2:
+            messagebox.showinfo(
+                "Interpolation",
+                "Linear interpolation requires at least two anchor frames (before and after).",
+            )
+            return
+
+        before = self._snapshot_edit_state()
+        applied = 0
+        skipped_manual = 0
+        skipped_existing = 0
+
+        with self.logic.lock:
+            existing_manual_keys = set(self.logic.manual_overrides.keys())
+
+        for f_idx in apply_frames:
+            key = self.logic._override_key(f_idx, track_id, role, aoi)
+            if key in existing_manual_keys:
+                skipped_manual += 1
+                continue
+            if int(f_idx) in known_boxes:
+                skipped_existing += 1
+                continue
+
+            pos = bisect.bisect_left(anchor_frames, int(f_idx))
+            if pos <= 0 or pos >= len(anchor_frames):
+                continue
+            f0 = anchor_frames[pos - 1]
+            f1 = anchor_frames[pos]
+            if f1 <= f0:
+                continue
+
+            t = (float(f_idx) - float(f0)) / float(f1 - f0)
+            interp = self._lerp_box(known_boxes[f0], known_boxes[f1], t)
+            self.logic.set_manual_override(f_idx, track_id, role, aoi, interp)
+            applied += 1
+
+        if applied <= 0:
+            messagebox.showinfo(
+                "Interpolation",
+                "No frames interpolated (already present/manual, or outside anchor interval).",
+            )
+            return
+
+        self.show_frame()
+        self._commit_action("Linear interpolation", before)
+        messagebox.showinfo(
+            "Interpolation",
+            f"Applied linear interpolation to {applied} frame(s). "
+            f"Skipped manual: {skipped_manual}, skipped existing: {skipped_existing}.",
+        )
+
     def clear_selected_override(self):
         if not self.manual_mode:
             messagebox.showinfo("Manual Mode", "Enable Manual Correction mode to clear frame-level edits.")
@@ -2132,7 +2334,7 @@ class RegionView:
         # --- GHOST TRACKS LOGIC ---
         if self.manual_mode:
             # Look +/- 1 second (approx 30 frames)
-            window = int(self.fps) if self.fps > 0 else 30
+            window = self.ghost_window_var.get()
             prof = self._effective_profile_for_frame(self.current_frame)
             ghosts = self.logic.find_ghost_tracks(self.current_frame, window, prof, self.kp_conf_thresh.get())
             
