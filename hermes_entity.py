@@ -1163,8 +1163,51 @@ class IdentityView:
         except Exception as e:
             print(f"Error saving audit log: {e}")
 
+        # --- ENRICHMENT STEP: Create new JSON with roles injected ---
+        enriched_filename = os.path.basename(self.json_path).replace(".json.gz", "_enriched.json.gz")
+        if self.context and self.context.paths.get("output"):
+            enriched_out = os.path.join(self.context.paths["output"], enriched_filename)
+        else:
+            enriched_out = self.json_path.replace(".json.gz", "_enriched.json.gz")
+
+        try:
+            with gzip.open(self.json_path, 'rt', encoding='utf-8') as f_in, \
+                 gzip.open(enriched_out, 'wt', encoding='utf-8') as f_out:
+                
+                for line in f_in:
+                    try:
+                        frame_data = json.loads(line)
+                        f_idx = frame_data.get('f_idx', -1)
+                        
+                        if 'det' in frame_data:
+                            for i, det in enumerate(frame_data['det']):
+                                raw_tid = det.get('track_id')
+                                if raw_tid is None: raw_tid = -1
+                                tid = int(raw_tid)
+                                
+                                # Replicate synthetic ID logic for lookup (handle untracked/merged)
+                                lookup_id = tid
+                                if tid == -1:
+                                    lookup_id = 9000000 + (f_idx * 1000) + i
+                                
+                                # Resolve Master ID & Role
+                                master_id = self.logic.id_lineage.get(lookup_id, lookup_id)
+                                if master_id in self.logic.tracks:
+                                    det['role'] = self.logic.tracks[master_id]['role']
+                                    det['master_id'] = master_id # Traceability for merges
+                                else:
+                                    det['role'] = "Ignore"
+                        
+                        f_out.write(json.dumps(frame_data) + "\n")
+                    except json.JSONDecodeError:
+                        continue
+            print(f"Enriched JSON saved: {enriched_out}")
+        except Exception as e:
+            print(f"Error enriching JSON: {e}")
+            messagebox.showerror("Enrichment Error", f"Failed to save enriched JSON:\n{e}")
+
         count = len(mapping)
-        messagebox.showinfo("Done", f"Mapped {count} IDs (including merged historical IDs).\nSaved to: {out}\nAudit Log: {os.path.basename(audit_out)}")
+        messagebox.showinfo("Done", f"Mapped {count} IDs.\n\nFiles Saved:\n1. Identity Map: {os.path.basename(out)}\n2. Enriched Data: {os.path.basename(enriched_out)}")
 
     def refresh_cast_list(self) -> None:
         self.list_cast.delete(0, tk.END)

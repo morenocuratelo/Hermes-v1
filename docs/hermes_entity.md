@@ -101,15 +101,27 @@ Permette di selezionare un tracciato cliccando direttamente sul video.
 
 ## 4. Output Dati (`save_mapping`)
 
-Genera il file finale di mappatura identità.
+La funzione di salvataggio genera ora due output distinti per garantire sia la compatibilità con i moduli successivi che la portabilità dei dati.
 
-*   **File:** `_identity.json`
+### 4.1. Mappa Identità (`_identity.json`)
 *   **Contenuto:** Un dizionario piatto `{ Original_YOLO_ID : "RoleName" }`.
 *   **Trasformazione:**
     1.  Itera su `id_lineage`.
     2.  Per ogni ID originale, controlla chi è il suo "Master" attuale.
     3.  Se il Master ha un ruolo diverso da "Ignore", scrive la mappatura.
 *   **Scopo:** Questo file viene usato dai moduli successivi (Region, Eye Mapping) per sapere che, ad esempio, l'ID 45, l'ID 46 e l'ID 98 sono tutti "Target".
+
+### 4.2. Dati Arricchiti (`_enriched.json.gz`)
+*   **Contenuto:** Una copia esatta del file di tracking originale (YOLO), arricchita con metadati semantici iniettati direttamente in ogni detection.
+*   **Campi Aggiunti:**
+    *   `role`: Il ruolo assegnato all'identità (es. "Target", "Confederate").
+    *   `master_id`: L'ID consolidato finale (utile per tracciare i merge effettuati).
+*   **Processo:**
+    1.  Apre il file originale in lettura (streaming) e il nuovo file in scrittura.
+    2.  Per ogni detection, risolve l'ID (gestendo anche gli ID sintetici per detection non tracciate `9000000+`).
+    3.  Consulta la `id_lineage` per recuperare il `master_id` e il `role` corrente.
+    4.  Scrive il nuovo JSON compresso.
+*   **Vantaggio:** Rende il dataset autoconsistente, contenendo sia i dati cinematici (keypoints) che quelli semantici (ruoli) in un unico file, facilitando l'analisi esterna senza dipendenze dalla mappa di identità.
 
 ---
 
