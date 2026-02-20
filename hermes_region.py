@@ -872,7 +872,15 @@ class RegionView:
         self.cb_profile.bind("<<ComboboxSelected>>", self.on_profile_change)
 
         tk.Button(f_prof, text="✨ New (Wizard)", command=self.open_profile_wizard, bg="#e1f5fe").pack(side=tk.LEFT, padx=5)
-        tk.Button(f_prof, text="💾 Save Session", command=self.save_session_now).pack(side=tk.LEFT, padx=5)
+        
+        mb_sess = tk.Menubutton(f_prof, text="💾 Session", relief="raised")
+        mb_sess.pack(side=tk.LEFT, padx=5)
+        m_sess = tk.Menu(mb_sess, tearoff=0)
+        m_sess.add_command(label="Save Session", command=self.save_session_now)
+        m_sess.add_command(label="Load Session...", command=self.load_session_dialog)
+        m_sess.add_separator()
+        m_sess.add_command(label="Reset Session", command=self.reset_session_dialog)
+        mb_sess.config(menu=m_sess)
 
         f_mode = tk.Frame(right)
         f_mode.pack(fill=tk.X, pady=(6, 2))
@@ -1104,6 +1112,29 @@ class RegionView:
         self.last_manual_save_ts = datetime.now().isoformat()
         self._autosave_session_state()
         messagebox.showinfo("Saved", "AOI session state saved.")
+
+    def load_session_dialog(self):
+        path = filedialog.askopenfilename(filetypes=[("Session JSON", "*.json")])
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            self._deserialize_session_state(payload)
+            self.show_frame()
+            messagebox.showinfo("Session Loaded", f"Session loaded successfully from:\n{os.path.basename(path)}")
+        except Exception as e:
+            messagebox.showerror("Load Error", f"Failed to load session:\n{e}")
+
+    def reset_session_dialog(self):
+        if messagebox.askyesno("Reset Session", "Clear all manual edits and overrides?"):
+            self.logic.manual_overrides = {}
+            self.toi_rule_overrides = {}
+            self.undo_stack.clear()
+            self.redo_stack.clear()
+            self._update_history_buttons()
+            self.refresh_editors()
+            self.show_frame()
 
     def _try_restore_newer_autosave(self):
         if not self.session_state_path or not os.path.exists(self.session_state_path):
