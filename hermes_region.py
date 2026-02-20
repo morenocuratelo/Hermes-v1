@@ -433,7 +433,8 @@ class RegionLogic:
             return ghosts
 
         with self.lock:
-            # 1. Identify what is already present/generated in the current frame
+            # 1. Identify what is already present/generated in the current frame.
+            # get_frame_aoi_data already applies priority: manual override > YOLO.
             current_aois = self.get_frame_aoi_data(frame_idx, profile, kp_conf_thresh)
             existing_keys = set((a['track_id'], a['aoi']) for a in current_aois)
             
@@ -514,26 +515,25 @@ class RegionLogic:
 
                 rules = self._get_rules(profile, role)
                 for rule in rules:
-                    base_shape = self.calculate_shape(kps, rule, kp_conf_thresh)
-                    
                     key = self._override_key(frame_idx, tid, role, rule['name'])
-                    
+
                     if key in frame_overrides:
-                        # Override exists: use it regardless of base_shape validity
+                        # PRIORITY 1: manual override is absolute; ignore pose-derived geometry.
                         shape = self._shape_from_box(
-                            base_shape.get("shape_type", "box") if base_shape else rule.get("shape", "box"),
+                            rule.get("shape", "box"),
                             frame_overrides[key],
-                            base_shape=base_shape,
                         )
                         corrected = True
                         processed_override_keys.add(key)
-                    elif base_shape:
+                    else:
+                        # PRIORITY 2: fallback to YOLO/keypoint-derived geometry.
+                        base_shape = self.calculate_shape(kps, rule, kp_conf_thresh)
+                        if not base_shape:
+                            # No override and calculation failed -> Skip
+                            continue
                         # No override, use calculated shape
                         shape = base_shape
                         corrected = False
-                    else:
-                        # No override and calculation failed -> Skip
-                        continue
 
                     row = {
                         "frame": int(frame_idx),
@@ -862,6 +862,7 @@ class RegionView:
         self.edit_x2 = tk.IntVar(value=1)
         self.edit_y2 = tk.IntVar(value=1)
         self.drag_state = None
+        self.pending_force_add = None
         self._orig_w = 0
         self._orig_h = 0
         self._disp_w = 0
@@ -1253,6 +1254,8 @@ class RegionView:
     def toggle_manual_mode(self):
         if not self.manual_mode:
             self.manual_mode = True
+            self.pending_force_add = None
+            self.drag_state = None
             self.manual_mode_snapshot = self._snapshot_edit_state()
             self.manual_mode_undo_snapshot = copy.deepcopy(self.undo_stack)
             self.manual_mode_redo_snapshot = copy.deepcopy(self.redo_stack)
@@ -1282,6 +1285,8 @@ class RegionView:
             self._update_history_buttons()
 
         self.manual_mode = False
+        self.pending_force_add = None
+        self.drag_state = None
         if self._manual_prev_scope:
             self.edit_scope_var.set(self._manual_prev_scope)
         self.manual_mode_snapshot = None
@@ -1726,7 +1731,11 @@ class RegionView:
         self.frame_correction_lf = lf
         tk.Label(
             lf,
-            text="Tip: turn Manual Correction ON, then click an AOI and drag a green corner (or drag inside to move).",
+            text=(
+                "Tip: turn Manual Correction ON, then click an AOI and drag a green corner "
+                "(or drag inside to move). Use 'Draw' in Force Add to create from video: "
+                "from any corner, or from center for circles."
+            ),
             fg="gray",
             font=("Arial", 8),
             wraplength=340,
@@ -1746,6 +1755,7 @@ class RegionView:
         self.cb_force_add = ttk.Combobox(f_add, state="readonly")
         self.cb_force_add.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         tk.Button(f_add, text="➕", width=3, command=self.force_add_new_aoi).pack(side=tk.LEFT)
+        tk.Button(f_add, text="Draw", width=5, command=self.force_add_draw_on_video).pack(side=tk.LEFT, padx=(4, 0))
 
         tk.Label(lf, text="x1").grid(row=4, column=0, sticky="w")
         tk.Entry(lf, textvariable=self.edit_x1, width=8).grid(row=4, column=1, sticky="w")
@@ -1796,12 +1806,37 @@ class RegionView:
         if values:
             self.cb_force_add.current(0)
 
-    def force_add_new_aoi(self):
+    def _selected_force_add_data(self):
         sel = self.cb_force_add.get()
         if not sel or not hasattr(self, 'force_add_lookup') or sel not in self.force_add_lookup:
-            return
+            return None
+        data = dict(self.force_add_lookup[sel])
+        data["shape_type"] = str(data.get("shape_type", "box")).lower()
+        return data
 
-        data = self.force_add_lookup[sel]
+    def _select_item_by_identity(self, track_id, role, aoi, box_hint=None):
+        track_id = int(track_id)
+        for key, item in self.frame_aoi_lookup.items():
+            if key.endswith("[GHOST]"):
+                continue
+            if int(item.get("track_id", -1)) != track_id:
+                continue
+            if str(item.get("role", "")) != str(role):
+                continue
+            if str(item.get("aoi", "")) != str(aoi):
+                continue
+            self.selected_frame_aoi.set(key)
+            if box_hint is not None:
+                self._set_box_vars(box_hint)
+            else:
+                self._set_box_vars(item["box"])
+            return True
+        return False
+
+    def force_add_new_aoi(self):
+        data = self._selected_force_add_data()
+        if not data:
+            return
         
         w, h = 100, 100
         cx = self._orig_w // 2 if hasattr(self, '_orig_w') and self._orig_w > 0 else 320
@@ -1812,11 +1847,47 @@ class RegionView:
         self._apply_manual_box_with_scope(data, box)
         self.show_frame()
         self._commit_action(f"Force add {data['role']}:{data['aoi']}", before)
+        self.pending_force_add = None
+        self._select_item_by_identity(data["track_id"], data["role"], data["aoi"], box_hint=box)
 
-        key = f"ID {data['track_id']} | {data['role']} | {data['aoi']} [{data['shape_type']}]"
-        if key in self.frame_aoi_lookup:
-            self.selected_frame_aoi.set(key)
-            self._set_box_vars(box)
+    def force_add_draw_on_video(self):
+        if not self.manual_mode:
+            messagebox.showinfo("Manual Mode", "Enable Manual Correction mode to draw AOIs on video.")
+            return
+        if not self.cap:
+            messagebox.showwarning("No Video", "Load a video first.")
+            return
+
+        data = self._selected_force_add_data()
+        if not data:
+            messagebox.showwarning("Force Add", "Select a Force Add AOI first.")
+            return
+
+        if self.pending_force_add:
+            same_item = (
+                int(self.pending_force_add.get("track_id", -1)) == int(data["track_id"]) and
+                str(self.pending_force_add.get("role", "")) == str(data["role"]) and
+                str(self.pending_force_add.get("aoi", "")) == str(data["aoi"])
+            )
+            if same_item:
+                self.pending_force_add = None
+                self.drag_state = None
+                self.show_frame()
+                return
+
+        self.pending_force_add = data
+        self.drag_state = None
+        if data["shape_type"] == "circle":
+            hint = (
+                f"Draw armed for {data['role']}:{data['aoi']} [circle]: "
+                "click+drag from CENTER to set radius."
+            )
+        else:
+            hint = (
+                f"Draw armed for {data['role']}:{data['aoi']} [{data['shape_type']}]: "
+                "click+drag from ANY CORNER to opposite corner."
+            )
+        self.lbl_player.config(text=hint)
 
     def _update_manual_editor_visibility(self):
         if not hasattr(self, "frame_correction_lf") or not hasattr(self, "lbl_manual_collapsed"):
@@ -2247,7 +2318,7 @@ class RegionView:
     def _on_video_mouse_down(self, event):
         if not self.manual_mode:
             return
-        if not self.cap or not self.frame_aoi_items:
+        if not self.cap:
             return
 
         pt = self._widget_to_frame_xy(event.x, event.y)
@@ -2256,6 +2327,40 @@ class RegionView:
 
         self.is_playing = False
         px, py = pt
+
+        if self.pending_force_add:
+            data = dict(self.pending_force_add)
+            shape_type = str(data.get("shape_type", "box")).lower()
+            if shape_type == "circle":
+                mode = "create_circle"
+                box = (px - 1, py - 1, px + 1, py + 1)
+            else:
+                mode = "create_corner"
+                box = (px, py, px + 1, py + 1)
+
+            start_box = self.logic._sanitize_box(box)
+            self.drag_state = {
+                "mode": mode,
+                "corner": None,
+                "start_pt": (px, py),
+                "start_box": start_box,
+                "track_id": data["track_id"],
+                "role": data["role"],
+                "aoi": data["aoi"],
+                "shape_type": shape_type,
+                "before_state": self._snapshot_edit_state(),
+                "is_creation": True,
+            }
+            self._apply_manual_box_with_scope(data, start_box)
+            self.show_frame()
+            self._select_item_by_identity(
+                data["track_id"], data["role"], data["aoi"], box_hint=start_box
+            )
+            return
+
+        if not self.frame_aoi_items:
+            return
+
         item, mode, corner = self._find_aoi_from_point(px, py)
         if not item:
             return
@@ -2284,7 +2389,14 @@ class RegionView:
         px, py = pt
         x1, y1, x2, y2 = self.drag_state["start_box"]
 
-        if self.drag_state["mode"] == "corner":
+        if self.drag_state["mode"] == "create_circle":
+            sx, sy = self.drag_state["start_pt"]
+            r = max(1, int(round(math.hypot(px - sx, py - sy))))
+            x1, y1, x2, y2 = sx - r, sy - r, sx + r, sy + r
+        elif self.drag_state["mode"] == "create_corner":
+            sx, sy = self.drag_state["start_pt"]
+            x1, y1, x2, y2 = sx, sy, px, py
+        elif self.drag_state["mode"] == "corner":
             corner = self.drag_state["corner"]
             if corner == "tl":
                 x1, y1 = px, py
@@ -2313,10 +2425,19 @@ class RegionView:
         }
         self._apply_manual_box_with_scope(item, new_box)
         self.show_frame()
+        self._select_item_by_identity(
+            self.drag_state["track_id"],
+            self.drag_state["role"],
+            self.drag_state["aoi"],
+            box_hint=new_box,
+        )
 
     def _on_video_mouse_up(self, _event):
         if self.drag_state and "before_state" in self.drag_state:
-            self._commit_action("Manual drag AOI", self.drag_state["before_state"])
+            label = "Create AOI from video" if self.drag_state.get("is_creation") else "Manual drag AOI"
+            self._commit_action(label, self.drag_state["before_state"])
+            if self.drag_state.get("is_creation"):
+                self.pending_force_add = None
         self.drag_state = None
 
     @staticmethod
