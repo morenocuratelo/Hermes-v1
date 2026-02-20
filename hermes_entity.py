@@ -276,13 +276,16 @@ class IdentityLogic:
             tail_frames = frames[split_idx:]
             tail_boxes = boxes[split_idx:]
             
+            # Inherit merged_from to maintain lineage for export lookup
+            inherited_merged = list(self.tracks[track_id]['merged_from'])
+
             if keep_head:
                 # Original keeps head
                 self.tracks[track_id]['frames'] = head_frames
                 self.tracks[track_id]['boxes'] = head_boxes
                 
                 # New gets tail
-                self.tracks[new_id] = {'frames': tail_frames, 'boxes': tail_boxes, 'role': 'Ignore', 'merged_from': []}
+                self.tracks[new_id] = {'frames': tail_frames, 'boxes': tail_boxes, 'role': 'Ignore', 'merged_from': inherited_merged}
                 self.id_lineage[new_id] = new_id
                 self._log_operation("Split Track", {"original": track_id, "new": new_id, "split_frame": split_frame, "kept": "head"})
                 return new_id, len(tail_frames)
@@ -292,7 +295,7 @@ class IdentityLogic:
                 self.tracks[track_id]['boxes'] = tail_boxes
                 
                 # New gets head
-                self.tracks[new_id] = {'frames': head_frames, 'boxes': head_boxes, 'role': 'Ignore', 'merged_from': []}
+                self.tracks[new_id] = {'frames': head_frames, 'boxes': head_boxes, 'role': 'Ignore', 'merged_from': inherited_merged}
                 self.id_lineage[new_id] = new_id
                 self._log_operation("Split Track", {"original": track_id, "new": new_id, "split_frame": split_frame, "kept": "tail"})
                 return new_id, len(head_frames)
@@ -1170,6 +1173,17 @@ class IdentityView:
         else:
             enriched_out = self.json_path.replace(".json.gz", "_enriched.json.gz")
 
+        # Pre-calculate lookup map for robust ID resolution (handles splits correctly)
+        # Map: original_id -> list of (track_id, set_of_frames)
+        id_frame_map = {}
+        with self.logic.lock:
+            for tid, data in self.logic.tracks.items():
+                f_set = set(data['frames'])
+                for orig_id in data['merged_from']:
+                    if orig_id not in id_frame_map:
+                        id_frame_map[orig_id] = []
+                    id_frame_map[orig_id].append((tid, f_set))
+
         try:
             with gzip.open(self.json_path, 'rt', encoding='utf-8') as f_in, \
                  gzip.open(enriched_out, 'wt', encoding='utf-8') as f_out:
@@ -1190,8 +1204,20 @@ class IdentityView:
                                 if tid == -1:
                                     lookup_id = 9000000 + (f_idx * 1000) + i
                                 
-                                # Resolve Master ID & Role
-                                master_id = self.logic.id_lineage.get(lookup_id, lookup_id)
+                                # Resolve Master ID & Role (Frame-Aware)
+                                master_id = -1
+                                
+                                # 1. Precise lookup by frame (handles splits)
+                                if lookup_id in id_frame_map:
+                                    for cand_tid, cand_frames in id_frame_map[lookup_id]:
+                                        if f_idx in cand_frames:
+                                            master_id = cand_tid
+                                            break
+                                
+                                # 2. Fallback to lineage (legacy/safety)
+                                if master_id == -1:
+                                    master_id = self.logic.id_lineage.get(lookup_id, lookup_id)
+
                                 if master_id in self.logic.tracks:
                                     det['role'] = self.logic.tracks[master_id]['role']
                                     det['master_id'] = master_id # Traceability for merges
