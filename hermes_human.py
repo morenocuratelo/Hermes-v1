@@ -3,6 +3,7 @@ from tkinter import filedialog, ttk, messagebox, scrolledtext
 import threading
 import os
 import sys
+import queue
 
 # Logic Imports
 import traceback
@@ -75,6 +76,52 @@ def _is_valid_model_file(path: str) -> bool:
 # il nostro strumento espone esplicitamente questi parametri all'utente tramite GUI, 
 # permettendo una regolazione fine (fine-tuning) specifica per le condizioni di illuminazione e densità 
 # della scena analizzata, superando i limiti di un approccio 'one-size-fits-all'.
+
+
+class ResultsWriter(threading.Thread):
+    """
+    Gestisce la scrittura su disco in un thread separato per non bloccare
+    il loop di inferenza della GPU. Usa una coda per bufferizzare i risultati.
+    """
+    def __init__(self, path, compress_level=3):
+        super().__init__(daemon=True)
+        self.path = path
+        self.compress_level = compress_level
+        self.queue = queue.Queue(maxsize=256) # Buffer di ~250 frame
+        self.stop_event = threading.Event()
+        self.error = None
+
+    def put(self, item):
+        """Aggiunge un item alla coda. Blocca se la coda è piena (backpressure)."""
+        # FIX: Loop con timeout per evitare deadlock se il writer crasha o viene stoppato
+        while not self.stop_event.is_set():
+            if self.error: raise self.error
+            try:
+                self.queue.put(item, timeout=0.1)
+                return
+            except queue.Full:
+                continue
+
+    def stop(self):
+        """Segnala al thread di finire di scrivere e chiudere."""
+        self.stop_event.set()
+        self.join()
+        if self.error: raise self.error
+
+    def run(self):
+        try:
+            # compresslevel=3 è un ottimo compromesso velocità/compressione per dati real-time
+            with gzip.open(self.path, 'wt', encoding='utf-8', compresslevel=self.compress_level) as f:
+                while not self.stop_event.is_set() or not self.queue.empty():
+                    try:
+                        # Timeout breve per controllare stop_event regolarmente
+                        data = self.queue.get(timeout=0.1)
+                        f.write(json.dumps(data) + "\n")
+                        self.queue.task_done()
+                    except queue.Empty:
+                        continue
+        except Exception as e:
+            self.error = e
 
 
 # ==========================================================================================
@@ -312,7 +359,7 @@ class PoseEstimatorLogic:
             return False
 
 # Run_analysis function is the core method that orchestrates the entire process of human pose estimation and tracking. It performs the following steps:
-    def run_analysis(self, config, on_progress=None, on_log=None):
+    def run_analysis(self, config, on_progress=None, on_log=None, stop_event=None):
         """
         Main execution method.
         config: dict containing paths, model names, and tracker parameters.
@@ -394,8 +441,16 @@ class PoseEstimatorLogic:
                 on_log("Starting analysis WITHOUT tracker (detection only)...")
             results = model.predict(**yolo_args)
 
-        with gzip.open(out_file, 'wt', encoding='utf-8') as f:
+        # Avvia il thread di scrittura asincrona
+        writer = ResultsWriter(out_file)
+        writer.start()
+
+        try:
             for i, result in enumerate(results):
+                if stop_event and stop_event.is_set():
+                    if on_log: on_log("🛑 Analysis interrupted by user.")
+                    break
+
                 # Normalize to numpy (handles CPU/GPU and Tensor/ndarray differences)
                 result = result.cpu().numpy()
 
@@ -421,13 +476,23 @@ class PoseEstimatorLogic:
                     "ts": round(i / fps, 4) if fps > 0 else 0,
                     "det": det_list
                 }
-                f.write(json.dumps(frame_data) + "\n")
+                
+                # Invia al thread di scrittura (non bloccante a meno che la coda sia piena)
+                writer.put(frame_data)
 
                 if on_progress and i % 10 == 0:
                     on_progress(i, total_frames, stage="inference")
                 
                 if i % 100 == 0 and on_log:
                     on_log(f"Processed Frame: {i}/{total_frames} | Tracked objects: {len(det_list)}")
+        
+        except Exception as e:
+            # Se c'è un errore nel loop principale, assicuriamoci di fermare il writer
+            writer.stop()
+            raise e
+            
+        # Chiude il writer e attende che finisca di scrivere gli ultimi dati in coda
+        writer.stop()
 
         if on_log:
             on_log("✅ YOLO analysis complete. JSON output saved.")
@@ -495,6 +560,10 @@ class YoloView:
         self.new_track_threshold = tk.DoubleVar(value=0.7)
         self.track_buffer = tk.IntVar(value=30) # Numero di frame per cui mantenere un ID attivo senza nuove detection (tracking "invisibile")
         
+        self.stop_event = threading.Event()
+        # Bind cleanup quando la vista viene distrutta (es. cambio modulo)
+        self.parent.bind("<Destroy>", self._on_destroy, add="+")
+
         # --- PARAMETRI AVANZATI TRACKER ---
         self.track_low_thresh = tk.DoubleVar(value=0.1) #Abbiamo adottato un approccio Two-Stage Association (ByteTrack strategy). La soglia bassa di 0.1 permette di mitigare l'occlusione temporanea (occlusion robustness), recuperando rilevazioni a bassa confidenza che sono spazialmente coerenti con le previsioni del filtro di Kalman, riducendo drasticamente i falsi negativi durante incroci complessi.
         self.proximity_thresh = tk.DoubleVar(value=0.5) #Il valore di 0.5 per la soglia di prossimità in BoT-SORT è stato scelto per bilanciare efficacemente la capacità del tracker di mantenere l'identità degli individui durante occlusioni parziali, senza essere troppo permissivo da causare errori di associazione (ID switch) in scenari affollati. Questo parametro, combinato con la soglia di apparenza, consente a BoT-SORT di distinguere tra individui vicini ma distinti, migliorando la robustezza complessiva del tracking.
@@ -510,6 +579,10 @@ class YoloView:
 
         self._build_ui()
         self._check_hardware_from_context()
+
+    def _on_destroy(self, event):
+        if event.widget == self.parent:
+            self.stop_event.set()
 
     def _build_ui(self):
         tk.Label(self.parent, text="1. Human Pose Estimation & Tracking", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 20), anchor="w")
@@ -670,7 +743,8 @@ class YoloView:
             
         self.is_running = True
         self.btn_run.config(state="disabled", text="INITIALIZING YOLO...")
-        t = threading.Thread(target=self.run_yolo_process)
+        self.stop_event.clear()
+        t = threading.Thread(target=self.run_yolo_process, daemon=True)
         t.start()
 
     def _update_progress(self, current, total, stage="inference"):
@@ -723,7 +797,8 @@ class YoloView:
             success = logic.run_analysis(
                 config, 
                 on_progress=self._update_progress,
-                on_log=self._log_message
+                on_log=self._log_message,
+                stop_event=self.stop_event
             )
             
             if success:
