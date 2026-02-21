@@ -371,6 +371,29 @@ class AppContext:
     def mapped_csv_path(self, val):
         self._set_manual_path("mapped_csv_path", val)
 
+    # --- 7. FILTERED OUTPUTS (I-VT) ---
+    @property
+    def fixations_csv_path(self):
+        manual = self._get_manual_path("fixations_csv_path")
+        if manual:
+            return manual
+        return self._find_file(self._get_active_output_dir(), '_fixations.csv')
+
+    @fixations_csv_path.setter
+    def fixations_csv_path(self, val):
+        self._set_manual_path("fixations_csv_path", val)
+
+    @property
+    def filtered_gaze_csv_path(self):
+        manual = self._get_manual_path("filtered_gaze_csv_path")
+        if manual:
+            return manual
+        return self._find_file(self._get_active_output_dir(), '_filtered.csv')
+
+    @filtered_gaze_csv_path.setter
+    def filtered_gaze_csv_path(self, val):
+        self._set_manual_path("filtered_gaze_csv_path", val)
+
     # --- PATHS DICTIONARY (Legacy Compatibility) ---
     @property
     def paths(self):

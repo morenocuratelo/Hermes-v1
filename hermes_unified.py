@@ -36,8 +36,9 @@ MODULES_MAP = {
     "3. ENTITY (ID Assignment)":       ("hermes_entity", "IdentityView"),
     "4. REGION (AOI Definition)":      ("hermes_region", "RegionView"),
     "5. EYE MAPPING":                  ("hermes_eye", "GazeView"),
-    "6. ANALYTICS & REPORTING":        ("hermes_stats", "GazeStatsView"),
-    "7. DATA REVIEWER":                ("hermes_reviewer", "ReviewerView") # Futuro
+    "6. GAZE FILTERS (I-VT)":          ("hermes_filters", "FilterView"),
+    "7. ANALYTICS & REPORTING":        ("hermes_stats", "GazeStatsView"),
+    "8. DATA REVIEWER":                ("hermes_reviewer", "ReviewerView")
 }
 
 # ════════════════════════════════════════════════════════════════

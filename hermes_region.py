@@ -125,13 +125,24 @@ class RegionLogic:
                     if 'keypoints' not in det:
                         continue
 
-                    # Track-ID handling (replicate Entity synthetic-ID logic)
-                    raw_tid = det.get('track_id', -1)
-                    if raw_tid is None:
-                        raw_tid = -1
-                    tid = int(raw_tid)
-                    if tid == -1:
-                        tid = 9000000 + (f_idx * 1000) + i
+                    # Hybrid Import: Check for enriched data (Master ID & Role)
+                    master_id = det.get('master_id')
+                    role = det.get('role')
+
+                    if master_id is not None:
+                        tid = int(master_id)
+                    else:
+                        # Legacy/Raw YOLO behavior
+                        raw_tid = det.get('track_id', -1)
+                        if raw_tid is None:
+                            raw_tid = -1
+                        tid = int(raw_tid)
+                        if tid == -1:
+                            tid = 9000000 + (f_idx * 1000) + i
+
+                    # Auto-populate identity map if role is present in the file
+                    if role:
+                        self.identity_map[str(tid)] = role
 
                     # Parse keypoints (support both dict and list formats)
                     raw_kps = det['keypoints']

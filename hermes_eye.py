@@ -280,6 +280,10 @@ class GazeLogic:
                 if not g2d:
                     continue
 
+                # Extract 3D Gaze (HUCS mm) if available - Useful for I-VT
+                g3d = gaze_pkg['data'].get('gaze3d')
+                g3d_x, g3d_y, g3d_z = (g3d[0], g3d[1], g3d[2]) if g3d and len(g3d) >= 3 else (None, None, None)
+
                 # The normalized gaze coordinates are unpacked into gx and gy for easier access.
                 gx, gy = g2d[0], g2d[1]
                 
@@ -326,6 +330,9 @@ class GazeLogic:
                     "Hit_y2":       hit_y2,
                     "Raw_Gaze2D_X": gx,
                     "Raw_Gaze2D_Y": gy,
+                    "Gaze_3D_X":    g3d_x,
+                    "Gaze_3D_Y":    g3d_y,
+                    "Gaze_3D_Z":    g3d_z,
                 })
 
         # 3. Write output

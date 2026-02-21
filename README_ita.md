@@ -34,11 +34,13 @@ Integrando la stima della posa basata su **YOLO** con rigorosi protocolli di sin
 Il software impone un flusso sequenziale per garantire l'integrità dei dati. Segui i moduli numerati nell'interfaccia:
 
 1.  **Human (Pose Estimation):** Estrae lo scheletro e traccia le persone nel video.
-2.  **Entity (Identity):** Assegna ruoli (es. "Target") ai tracciati anonimi e corregge errori.
-3.  **Region (AOI Definition):** Definisce le regole geometriche per le AOI (es. Faccia = Naso + Occhi).
-4.  **Master TOI (Sync):** Sincronizza i log dell'eye-tracker con il video e definisce le fasi temporali.
+2.  **Master TOI (Sync):** Sincronizza i log dell'eye-tracker con il video e definisce le fasi temporali.
+3.  **Entity (Identity):** Assegna ruoli (es. "Target") ai tracciati anonimi e corregge errori.
+4.  **Region (AOI Definition):** Definisce le regole geometriche per le AOI (es. Faccia = Naso + Occhi).
 5.  **Eye Mapping:** Incrocia geometricamente lo sguardo con le AOI dinamiche.
-6.  **Stats:** Genera report statistici e file Excel completi.
+6.  **Gaze Filters (I-VT):** (Opzionale) Classifica i movimenti oculari in Fissazioni e Saccadi.
+7.  **Analytics & Reporting:** Genera report statistici e file Excel completi.
+8.  **Data Reviewer:** Player per la verifica qualitativa dei dati.
 
 ---
 
@@ -76,7 +78,7 @@ Definisce le Aree di Interesse basandosi sui keypoints.
     *   `shape`: `box`, `circle`, `oval`, o `polygon`.
 *   **Ghost Tracks:** Il sistema rileva automaticamente frame dove il tracking è perso ma presente nei frame adiacenti, permettendo di interpolare o copiare la posizione dell'AOI ("Force Add").
 
-### 4. Master TOI (Synchronization)
+### 2. Master TOI (Synchronization)
 Allinea flussi dati asincroni (Tobii vs Video).
 
 *   **Logica di Sync:** Calcola un offset lineare basandosi su un evento comune (es. "VideoStart" nel log Tobii e nel log sperimentale).
@@ -91,14 +93,22 @@ Esegue l'hit-testing geometrico.
     3.  Verifica se il punto di sguardo cade dentro una o più AOI.
     4.  **Sovrapposizioni:** Se lo sguardo colpisce più AOI (es. Faccia dentro Corpo), vince l'AOI con l'**area minore** (più specifica).
 
-### 6. Statistics
+### 6. Gaze Filters (I-VT)
+Implementa l'algoritmo *Velocity-Threshold Identification* (I-VT) per classificare i campioni di sguardo.
+
+*   **Pipeline:** Gap Fill -> Noise Reduction -> Velocity Calc -> Thresholding -> Merge -> Discard.
+*   **Output:** Genera file `_FIXATIONS.csv` (eventi discreti) e `_FILTERED.csv` (campioni classificati).
+*   **Supporto 3D:** Se disponibili, usa i vettori di sguardo 3D per un calcolo preciso della velocità angolare, altrimenti usa un'approssimazione geometrica 2D.
+
+### 7. Analytics & Reporting
 Genera il report finale.
 
 *   **Metriche Calcolate:**
     *   **Duration:** Tempo totale trascorso nell'AOI.
     *   **Percentage:** % del tempo della fase trascorso nell'AOI.
-    *   **Latency:** Tempo al primo ingresso nell'AOI dall'inizio della fase.
+    *   **Latency:** Tempo al primo ingresso nell'AOI dall'inizio della fase (o TTFF se presenti fissazioni).
     *   **Glances:** Numero di volte che lo sguardo entra nell'AOI.
+    *   **Fixation Metrics:** (Se filtro I-VT eseguito) Durata totale fissazioni, Conteggio fissazioni, Durata media sguardo.
 *   **Master Report:** Può generare un file Excel multi-foglio contenente Stats, Raw Data, Mapping, e configurazioni, pronto per l'archiviazione.
 
 ---

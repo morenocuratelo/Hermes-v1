@@ -3,6 +3,8 @@ from tkinter import filedialog, ttk, messagebox
 import pandas as pd
 import numpy as np
 import os
+import json
+import gzip
 import threading
 
 # ═══════════════════════════════════════════════════════════════════
@@ -146,6 +148,12 @@ class StatsLogic:
         if progress_callback: 
             progress_callback(f"Frequency detected: {real_freq:.1f}Hz (Using {freq:.1f}Hz)")
 
+        # Check for Fixation data columns (Output from I-VT Filter)
+        has_fixations = 'EventType' in df_gaze.columns
+        has_groups = 'grp' in df_gaze.columns
+        if has_fixations and progress_callback:
+            progress_callback("Fixation data detected (EventType). Calculating fixation metrics...")
+
         # 3. Analisi Per-Fase
         results = []
         total_phases = len(df_toi)
@@ -218,6 +226,31 @@ class StatsLogic:
                     mask = (subset['Hit_Role'] == r) & (subset['Hit_AOI'] == a)
                     glances = (mask & ~mask.shift(1).fillna(False)).sum()
 
+                # --- NEW METRICS ---
+                # 5. Avg Glance Duration
+                avg_glance_dur = duration / glances if glances > 0 else 0.0
+                
+                # 6. Fixation Metrics (if available from I-VT Filter)
+                fix_dur = 0.0
+                fix_count = 0
+                ttff = None
+                
+                if has_fixations:
+                    # Filter for Fixation samples on this AOI
+                    mask_fix = (subset['Hit_Role'] == r) & (subset['Hit_AOI'] == a) & (subset['EventType'] == 'Fixation')
+                    fix_subset = subset[mask_fix]
+                    
+                    if not fix_subset.empty:
+                        fix_dur = len(fix_subset) * sample_dur
+                        
+                        if has_groups:
+                            fix_count = fix_subset['grp'].nunique()
+                        else:
+                            fix_count = (mask_fix & ~mask_fix.shift(1).fillna(False)).sum()
+                            
+                        first_fix_ts = fix_subset['Timestamp'].min()
+                        ttff = first_fix_ts - t_start
+
                 # --- Output Formatting ---
                 if long_format:
                     # LONG FORMAT (Tidy Data): Una riga per ogni combinazione (Fase, Ruolo, AOI)
@@ -231,6 +264,11 @@ class StatsLogic:
                     row_long['Percentage'] = perc
                     row_long['Latency'] = latency
                     row_long['Glances'] = glances
+                    row_long['Avg_Glance_Dur'] = avg_glance_dur
+                    if has_fixations:
+                        row_long['Fixation_Dur'] = fix_dur
+                        row_long['Fixation_Count'] = fix_count
+                        row_long['TTFF'] = ttff
                     
                     results.append(row_long)
                 
@@ -248,6 +286,14 @@ class StatsLogic:
 
                     # 4. Glance Count
                     res_row[f"{key_base}_Glances"] = glances
+
+                    # 5. Avg Glance Duration
+                    res_row[f"{key_base}_Avg_Glance_Dur"] = avg_glance_dur
+                    
+                    if has_fixations:
+                        res_row[f"{key_base}_Fix_Dur"] = fix_dur
+                        res_row[f"{key_base}_Fix_Count"] = fix_count
+                        res_row[f"{key_base}_TTFF"] = ttff
 
             if not long_format:
                 results.append(res_row)
@@ -281,18 +327,69 @@ class StatsLogic:
         """
         # Definizione statica delle legende per garantire la coerenza formale con il template
         legends_dict = {
-            "Stats_Summary": pd.DataFrame({
-                "Column": ["Gaze_Samples_Total", "Gaze_Valid_Time", "Tracking_Ratio"],
-                "Description": ["Total gaze samples in phase", "Valid gaze duration (sec)", "Ratio of tracked time vs phase duration"]
+            # 1. HUMAN (Kinematic Extraction)
+            "YOLO": pd.DataFrame({
+                            "Column": ["Frame", "Timestamp", "TrackID", "Conf", "Box_X1", "Box_Y1", "Box_X2", "Box_Y2"] + 
+                                    [f"{kp}_{axis}" for kp in ["Nose", "L_Eye", "R_Eye", "L_Ear", "R_Ear", "L_Shoulder", "R_Shoulder", "L_Elbow", "R_Elbow", "L_Wrist", "R_Wrist", "L_Hip", "R_Hip", "L_Knee", "R_Knee", "L_Ankle", "R_Ankle"] for axis in ["X", "Y", "C"]],
+                            "Description": ["Indice del frame video di riferimento.", "Timestamp in secondi dall'inizio del video.", "Identificativo numerico del soggetto tracciato da YOLO.", "Confidenza del detector YOLO per la detection (0.0-1.0).", "Coordinata X del vertice alto-sinistra della bounding box.", "Coordinata Y del vertice alto-sinistra della bounding box.", "Coordinata X del vertice basso-destra della bounding box.", "Coordinata Y del vertice basso-destra della bounding box."] + 
+                                        [f"{kp}: {desc}" for kp in ["Nose", "L_Eye", "R_Eye", "L_Ear", "R_Ear", "L_Shoulder", "R_Shoulder", "L_Elbow", "R_Elbow", "L_Wrist", "R_Wrist", "L_Hip", "R_Hip", "L_Knee", "R_Knee", "L_Ankle", "R_Ankle"] for desc in ["Coordinata X in pixel del keypoint.", "Coordinata Y in pixel del keypoint.", "Confidenza (0.0-1.0) del keypoint rilevato."]]
+                        }),
+            
+            # 2. MASTER TOI (Sync & Cut)
+            "TOI": pd.DataFrame({
+                "Column": ["Name", "Start", "End", "Duration", "Trial", "Condition", "Phase"],
+                "Description": ["Nome univoco del TOI/fase sperimentale.", "Tempo di inizio del TOI in secondi.", "Tempo di fine del TOI in secondi.", "Durata del TOI in secondi (End - Start).", "Indice o etichetta del trial sperimentale.", "Condizione sperimentale associata al campione/fase.", "Nome della fase sperimentale."]
             }),
-            # NOTA: Completa i dizionari sottostanti con il contenuto esatto dei file "L - ..." che possiedi
-            "Stats_Raw": pd.DataFrame({"Column": ["Timestamp", "Phase", "Condition"], "Description": ["...", "...", "..."]}),
-            "Mapping": pd.DataFrame({"Column": ["...", "..."], "Description": ["...", "..."]}),
-            "AOI": pd.DataFrame({"Column": ["...", "..."], "Description": ["...", "..."]}),
-            "Identity": pd.DataFrame({"Column": ["...", "..."], "Description": ["...", "..."]}),
-            "YOLO_Cropped": pd.DataFrame({"Column": ["...", "..."], "Description": ["...", "..."]}),
-            "TOI": pd.DataFrame({"Column": ["...", "..."], "Description": ["...", "..."]}),
-            "YOLO": pd.DataFrame({"Column": ["...", "..."], "Description": ["...", "..."]})
+            "YOLO_Cropped": pd.DataFrame({
+                            "Column": ["Frame", "Timestamp", "TrackID", "Conf", "Box_X1", "Box_Y1", "Box_X2", "Box_Y2"] + 
+                                    [f"{kp}_{axis}" for kp in ["Nose", "L_Eye", "R_Eye", "L_Ear", "R_Ear", "L_Shoulder", "R_Shoulder", "L_Elbow", "R_Elbow", "L_Wrist", "R_Wrist", "L_Hip", "R_Hip", "L_Knee", "R_Knee", "L_Ankle", "R_Ankle"] for axis in ["X", "Y", "C"]],
+                            "Description": ["Indice del frame video di riferimento.", "Timestamp in secondi dall'inizio del video.", "Identificativo numerico del soggetto tracciato da YOLO.", "Confidenza del detector YOLO per la detection (0.0-1.0).", "Coordinata X del vertice alto-sinistra della bounding box.", "Coordinata Y del vertice alto-sinistra della bounding box.", "Coordinata X del vertice basso-destra della bounding box.", "Coordinata Y del vertice basso-destra della bounding box."] + 
+                                        [f"{kp}: {desc}" for kp in ["Nose", "L_Eye", "R_Eye", "L_Ear", "R_Ear", "L_Shoulder", "R_Shoulder", "L_Elbow", "R_Elbow", "L_Wrist", "R_Wrist", "L_Hip", "R_Hip", "L_Knee", "R_Knee", "L_Ankle", "R_Ankle"] for desc in ["Coordinata X in pixel del keypoint.", "Coordinata Y in pixel del keypoint.", "Confidenza (0.0-1.0) del keypoint rilevato."]]
+                        }),
+
+            # 3. ENTITY (Identity Assignment)
+            "Identity": pd.DataFrame({
+                "Column": ["TrackID", "Role"],
+                "Description": ["Identificativo numerico del soggetto tracciato da YOLO.", "Ruolo semantico del soggetto (es. Target, Confederate)."]
+            }),
+            "Enriched": pd.DataFrame({
+                "Column": ["Frame", "Timestamp", "TrackID", "MasterID", "Role", "Conf", "Box_X1", "Box_Y1", "Box_X2", "Box_Y2"] + 
+                          [f"{kp}_{axis}" for kp in ["Nose", "L_Eye", "R_Eye", "L_Ear", "R_Ear", "L_Shoulder", "R_Shoulder", "L_Elbow", "R_Elbow", "L_Wrist", "R_Wrist", "L_Hip", "R_Hip", "L_Knee", "R_Knee", "L_Ankle", "R_Ankle"] for axis in ["X", "Y", "C"]],
+                "Description": ["Indice del frame video di riferimento.", "Timestamp in secondi dall'inizio del video.", "Identificativo numerico originale (YOLO).", "Identificativo numerico consolidato (dopo merge/split).", "Ruolo semantico assegnato (es. Target).", "Confidenza del detector YOLO.", "Coordinata X del vertice alto-sinistra della bounding box.", "Coordinata Y del vertice alto-sinistra della bounding box.", "Coordinata X del vertice basso-destra della bounding box.", "Coordinata Y del vertice basso-destra della bounding box."] + 
+                               [f"{kp}: {desc}" for kp in ["Nose", "L_Eye", "R_Eye", "L_Ear", "R_Ear", "L_Shoulder", "R_Shoulder", "L_Elbow", "R_Elbow", "L_Wrist", "R_Wrist", "L_Hip", "R_Hip", "L_Knee", "R_Knee", "L_Ankle", "R_Ankle"] for desc in ["Coordinata X in pixel del keypoint.", "Coordinata Y in pixel del keypoint.", "Confidenza (0.0-1.0) del keypoint rilevato."]]
+            }),
+
+            # 4. REGION (AOI Definition)
+            "AOI": pd.DataFrame({
+                "Column": ["Frame", "Timestamp", "TrackID", "Role", "AOI", "ShapeType", "ShapePoints", "CenterX", "CenterY", "Radius", "RadiusX", "RadiusY", "Angle", "x1", "y1", "x2", "y2", "Corrected"],
+                "Description": ["Indice del frame video di riferimento.", "Timestamp in secondi dall'inizio del video.", "Identificativo numerico del soggetto tracciato da YOLO.", "Ruolo semantico del soggetto (es. Target, Confederate).", "Area of Interest anatomica (es. Face, Hands, Torso).", "Tipo geometrico AOI (box, polygon, ellipse, circle).", "Coordinate serializzate dei punti della forma AOI.", "Coordinata X del centro (forme circolari/ellittiche).", "Coordinata Y del centro (forme circolari/ellittiche).", "Raggio (forme circolari).", "Semiasse/raggio X (forme ellittiche).", "Semiasse/raggio Y (forme ellittiche).", "Angolo di rotazione della forma (gradi).", "Coordinata X del vertice alto-sinistra AOI box.", "Coordinata Y del vertice alto-sinistra AOI box.", "Coordinata X del vertice basso-destra AOI box.", "Coordinata Y del vertice basso-destra AOI box.", "1 se AOI corretta manualmente, 0 se solo automatica."]
+            }),
+
+            # 5. EYE MAPPING
+            "Mapping": pd.DataFrame({
+                "Column": ["Timestamp", "Frame_Est", "Gaze_X", "Gaze_Y", "Hit_Role", "Hit_AOI", "Hit_TrackID", "Hit_Shape", "Hit_x1", "Hit_y1", "Hit_x2", "Hit_y2", "Raw_Gaze2D_X", "Raw_Gaze2D_Y"],
+                "Description": ["Timestamp in secondi dall'inizio del video.", "Frame stimato a partire dal timestamp del campione gaze.", "Coordinata X gaze sul frame video (pixel).", "Coordinata Y gaze sul frame video (pixel).", "Ruolo del soggetto colpito dal gaze; vuoto se background.", "AOI specifica colpita dal gaze (es. Face).", "TrackID del soggetto colpito dal gaze.", "Tipo geometrico della AOI colpita.", "Limite sinistro AOI colpita.", "Limite alto AOI colpita.", "Limite destro AOI colpita.", "Limite basso AOI colpita.", "Coordinata gaze normalizzata X (0-1) dal tracker.", "Coordinata gaze normalizzata Y (0-1) dal tracker."]
+            }),
+
+            # 6. GAZE FILTERS (I-VT)
+            "Filtered_Gaze": pd.DataFrame({
+                "Column": ["Timestamp", "Gaze_X", "Gaze_Y", "Velocity", "EventType"],
+                "Description": ["Timestamp del campione (secondi).", "Coordinata X dello sguardo (pixel), filtrata/interpolata.", "Coordinata Y dello sguardo (pixel), filtrata/interpolata.", "Velocità angolare istantanea (°/s).", "Classificazione I-VT (Fixation, Saccade, Unknown)."]
+            }),
+            "Fixations": pd.DataFrame({
+                "Column": ["start", "end", "duration", "x", "y", "count"],
+                "Description": ["Timestamp di inizio della fissazione (secondi).", "Timestamp di fine della fissazione (secondi).", "Durata della fissazione in millisecondi.", "Coordinata X media del centroide della fissazione (pixel).", "Coordinata Y media del centroide della fissazione (pixel).", "Numero di campioni di sguardo inclusi nella fissazione."]
+            }),
+
+            # 7. ANALYTICS
+            "Stats_Raw": pd.DataFrame({
+                "Column": ["Timestamp", "Frame_Est", "Gaze_X", "Gaze_Y", "Hit_Role", "Hit_AOI", "Hit_TrackID", "Hit_Shape", "Hit_x1", "Hit_y1", "Hit_x2", "Hit_y2", "Raw_Gaze2D_X", "Raw_Gaze2D_Y", "Phase", "Condition", "Trial"],
+                "Description": ["Timestamp in secondi dall'inizio del video.", "Frame stimato a partire dal timestamp del campione gaze.", "Coordinata X gaze sul frame video (pixel).", "Coordinata Y gaze sul frame video (pixel).", "Ruolo del soggetto colpito dal gaze; vuoto se background.", "AOI specifica colpita dal gaze (es. Face).", "TrackID del soggetto colpito dal gaze.", "Tipo geometrico della AOI colpita.", "Limite sinistro AOI colpita.", "Limite alto AOI colpita.", "Limite destro AOI colpita.", "Limite basso AOI colpita.", "Coordinata gaze normalizzata X (0-1) dal tracker.", "Coordinata gaze normalizzata Y (0-1) dal tracker.", "Nome della fase sperimentale.", "Condizione sperimentale associata al campione/fase.", "Indice o etichetta del trial sperimentale."]
+            }),
+            "Stats_Summary": pd.DataFrame({
+                "Column": ["Name", "Start", "End", "Duration", "Trial", "Condition", "Phase", "Gaze_Samples_Total", "Gaze_Valid_Time", "Tracking_Ratio", "Hit_Role", "Hit_AOI", "Glances", "Latency", "Percentage", "Avg_Glance_Dur", "Fixation_Dur", "Fixation_Count", "TTFF"],
+                "Description": ["Nome univoco del TOI/fase sperimentale.", "Tempo di inizio del TOI in secondi.", "Tempo di fine del TOI in secondi.", "Durata del TOI in secondi (End - Start).", "Indice o etichetta del trial sperimentale.", "Condizione sperimentale associata al campione/fase.", "Nome della fase sperimentale.", "Numero totale campioni gaze nella fase.", "Tempo (s) con gaze valido nella fase.", "Qualità tracking = Gaze_Valid_Time / Duration.", "Ruolo del soggetto colpito dal gaze; vuoto se background.", "AOI specifica colpita dal gaze (es. Face).", "Numero di ingressi dello sguardo nella AOI.", "Secondi dall'inizio fase alla prima fissazione AOI.", "Percentuale del tempo fase passato sulla AOI.", "Durata media di uno sguardo (Duration / Glances).", "Tempo totale di fissazione (somma campioni Fixation).", "Numero di fissazioni distinte.", "Time To First Fixation (latenza prima fissazione)."]
+            }),
         }
 
         try:
@@ -406,6 +503,54 @@ class GazeStatsView:
         if f:
             var.set(f)
 
+    def _load_and_flatten_enriched_json(self, path):
+        if not os.path.exists(path):
+            return None
+        
+        rows = []
+        try:
+            with gzip.open(path, 'rt', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        frame = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                        
+                    f_idx = frame.get('f_idx')
+                    ts = frame.get('ts')
+                    
+                    for det in frame.get('det', []):
+                        row = {
+                            "Frame": f_idx,
+                            "Timestamp": ts,
+                            "TrackID": det.get('track_id'),
+                            "MasterID": det.get('master_id'),
+                            "Role": det.get('role'),
+                            "Conf": det.get('conf'),
+                        }
+                        box = det.get('box', {})
+                        row.update({
+                            "Box_X1": box.get('x1'), "Box_Y1": box.get('y1'),
+                            "Box_X2": box.get('x2'), "Box_Y2": box.get('y2')
+                        })
+                        kps = det.get('keypoints', [])
+                        kp_names = ["Nose", "L_Eye", "R_Eye", "L_Ear", "R_Ear", "L_Shoulder", "R_Shoulder", "L_Elbow", "R_Elbow", "L_Wrist", "R_Wrist", "L_Hip", "R_Hip", "L_Knee", "R_Knee", "L_Ankle", "R_Ankle"]
+                        for i, kp in enumerate(kp_names):
+                            if i < len(kps):
+                                p = kps[i]
+                                row[f"{kp}_X"] = p[0]
+                                row[f"{kp}_Y"] = p[1]
+                                row[f"{kp}_C"] = p[2] if len(p) > 2 else 0
+                            else:
+                                row[f"{kp}_X"] = 0
+                                row[f"{kp}_Y"] = 0
+                                row[f"{kp}_C"] = 0
+                        rows.append(row)
+            return pd.DataFrame(rows)
+        except Exception as e:
+            print(f"Error loading enriched JSON: {e}")
+            return None
+
     # ── Threading ──────────────────────────────────────────────────
 
     def run_analysis_thread(self):
@@ -467,8 +612,14 @@ class GazeStatsView:
                         identity_path = os.path.join(base_dir, f"{prefix}_video_yolo_CROPPED_identity.json")
                         yolo_cropped_path = os.path.join(base_dir, f"{prefix}_video_yolo_CROPPED.csv")
                         
+                        # Tentativo di caricare enriched (preferenza per CROPPED se esiste)
+                        enriched_path = os.path.join(base_dir, f"{prefix}_video_yolo_CROPPED_enriched.json.gz")
+                        if not os.path.exists(enriched_path):
+                            enriched_path = os.path.join(base_dir, f"{prefix}_video_yolo_enriched.json.gz")
+                        
                         dfs["AOI"] = pd.read_csv(aoi_path) if os.path.exists(aoi_path) else None
                         dfs["Identity"] = pd.read_json(identity_path) if os.path.exists(identity_path) else None
+                        dfs["Enriched"] = self._load_and_flatten_enriched_json(enriched_path)
                         
                         # Caricamento del file YOLO Cropped (ora in formato CSV appiattito)
                         dfs["YOLO_Cropped"] = pd.read_csv(yolo_cropped_path) if os.path.exists(yolo_cropped_path) else None
@@ -476,6 +627,12 @@ class GazeStatsView:
                         # Il file YOLO raw base (generato automaticamente come CSV)
                         yolo_raw_path = os.path.join(base_dir, f"{prefix}_video_yolo.csv")
                         dfs["YOLO"] = pd.read_csv(yolo_raw_path) if os.path.exists(yolo_raw_path) else None
+
+                        # Caricamento Output Filtri I-VT (se presenti)
+                        fix_path = os.path.join(base_dir, f"{prefix}_FIXATIONS.csv")
+                        filt_path = os.path.join(base_dir, f"{prefix}_FILTERED.csv")
+                        dfs["Fixations"] = pd.read_csv(fix_path) if os.path.exists(fix_path) else None
+                        dfs["Filtered_Gaze"] = pd.read_csv(filt_path) if os.path.exists(filt_path) else None
 
                         default_excel_name = os.path.join(base_dir, f"{prefix}_MASTER_REPORT.xlsx")
                         self.parent.after(0, lambda: self._save_master_results(dfs, default_excel_name))
