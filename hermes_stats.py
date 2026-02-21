@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
+from typing import Any, Dict, cast
 import pandas as pd
 import numpy as np
 import os
@@ -325,6 +326,10 @@ class StatsLogic:
         Genera il Master Report Excel alternando fogli dati e fogli legenda.
         Richiede 'xlsxwriter' installato (pip install xlsxwriter).
         """
+        # Check if we have at least one valid dataframe
+        if not any(df is not None for df in data_frames_dict.values()):
+            return
+
         # Definizione statica delle legende per garantire la coerenza formale con il template
         legends_dict = {
             # 1. HUMAN (Kinematic Extraction)
@@ -407,8 +412,26 @@ class StatsLogic:
                         # (Opzionale) Auto-fit delle colonne per leggibilità
                         worksheet = writer.sheets[sheet_name]
                         for i, col in enumerate(df.columns):
-                            column_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
-                            worksheet.set_column(i, i, column_len)
+                            try:
+                                # Handle empty dataframe and non-string column headers (e.g. float)
+                                max_val_len = 0
+                                if not df.empty:
+                                    series = df[col]
+                                    # Check if series is actually a Series (not DataFrame due to duplicate cols)
+                                    if isinstance(series, pd.Series):
+                                        max_val_len = series.astype(str).map(len).max()
+                                        if pd.isna(max_val_len): max_val_len = 0
+                                
+                                col_header_len = len(str(col))
+                                column_len = max(int(max_val_len), int(col_header_len)) + 2
+                                worksheet.set_column(i, i, min(column_len, 80))
+                            except Exception:
+                                worksheet.set_column(i, i, 15)
+                    else:
+                        # Gestione file mancante
+                        pd.DataFrame({"Status": ["File mancante!"]}).to_excel(writer, sheet_name=sheet_name, index=False)
+                        worksheet = writer.sheets[sheet_name]
+                        worksheet.set_column(0, 0, 30)
         except Exception as e:
             raise ValueError(f"Error generating Master Excel: {e}")
 
@@ -503,6 +526,25 @@ class GazeStatsView:
         if f:
             var.set(f)
 
+    def _ask_user_for_file(self, label, expected_path, filetypes):
+        """
+        Thread-safe method to ask user for a missing file.
+        Returns the path string or None.
+        """
+        result: list[Any] = [None]
+        event = threading.Event()
+
+        def _ask():
+            if messagebox.askyesno("File mancante", f"Impossibile trovare il file '{label}'.\n\nPercorso atteso:\n{os.path.basename(expected_path)}\n\nVuoi selezionarlo manualmente?", parent=self.parent):
+                path = filedialog.askopenfilename(title=f"Seleziona {label}", filetypes=filetypes, parent=self.parent)
+                if path:
+                    result[0] = path
+            event.set()
+
+        self.parent.after(0, _ask)
+        event.wait()
+        return result[0]
+
     def _load_and_flatten_enriched_json(self, path):
         if not os.path.exists(path):
             return None
@@ -596,45 +638,69 @@ class GazeStatsView:
                         self.parent.after(0, lambda: self.status_var.set("Compiling Master Report..."))
                         base_dir = os.path.dirname(mapped)
                         # Assumiamo che il file mapped si chiami es: BWWW_TD_Inv_11_GC_MAPPED.csv
-                        # Ricaviamo il prefisso rimuovendo la parte finale conosciuta
-                        prefix = os.path.basename(mapped).replace("_MAPPED.csv", "").replace("_gaze_MAPPED.csv", "")
+                        # Ricaviamo il prefisso pulito (per AOI/YOLO) e quello gaze (per Fixations)
+                        base_name = os.path.basename(mapped)
+                        if "_gaze_MAPPED.csv" in base_name:
+                            clean_prefix = base_name.replace("_gaze_MAPPED.csv", "")
+                            gaze_prefix = clean_prefix + "_gaze"
+                        else:
+                            clean_prefix = base_name.replace("_MAPPED.csv", "")
+                            gaze_prefix = clean_prefix
                         
                         # Caricamento dinamico dei file extra (con fallback a None se non trovati)
-                        dfs = {
-                            "Stats_Summary": df_stats,
-                            "Stats_Raw": df_raw if df_raw is not None else (self.logic.generate_raw_dataset(mapped, toi) if not self.var_raw.get() else None),
-                            "Mapping": pd.read_csv(mapped) if os.path.exists(mapped) else None,
-                            "TOI": pd.read_csv(toi, sep='\t') if os.path.exists(toi) else None,
-                        }
+                        dfs: Dict[str, Any] = {}
+                        dfs["Stats_Summary"] = df_stats
+                        dfs["Stats_Raw"] = df_raw if df_raw is not None else (self.logic.generate_raw_dataset(mapped, toi) if not self.var_raw.get() else None)
+                        dfs["Mapping"] = pd.read_csv(mapped) if os.path.exists(mapped) else None
+                        dfs["TOI"] = pd.read_csv(toi, sep='\t') if os.path.exists(toi) else None
+
+                        # Helper per caricamento interattivo
+                        def smart_load(label, path, loader, ftypes) -> Any:
+                            if os.path.exists(path):
+                                try:
+                                    return loader(path)
+                                except Exception:
+                                    return None
+                            
+                            # Se non esiste, chiedi all'utente
+                            user_path = self._ask_user_for_file(label, path, ftypes)
+                            if user_path and os.path.exists(user_path):
+                                try:
+                                    return loader(user_path)
+                                except Exception:
+                                    return None
+                            return None
 
                         # Auto-discovery degli altri file basati sul prefisso
-                        aoi_path = os.path.join(base_dir, f"{prefix}_AOI.csv")
-                        identity_path = os.path.join(base_dir, f"{prefix}_video_yolo_CROPPED_identity.json")
-                        yolo_cropped_path = os.path.join(base_dir, f"{prefix}_video_yolo_CROPPED.csv")
+                        aoi_path = os.path.join(base_dir, f"{clean_prefix}_AOI.csv")
+                        identity_path = os.path.join(base_dir, f"{clean_prefix}_video_yolo_CROPPED_identity.json")
+                        yolo_cropped_path = os.path.join(base_dir, f"{clean_prefix}_video_yolo_CROPPED.csv")
                         
                         # Tentativo di caricare enriched (preferenza per CROPPED se esiste)
-                        enriched_path = os.path.join(base_dir, f"{prefix}_video_yolo_CROPPED_enriched.json.gz")
+                        enriched_path = os.path.join(base_dir, f"{clean_prefix}_video_yolo_CROPPED_enriched.json.gz")
                         if not os.path.exists(enriched_path):
-                            enriched_path = os.path.join(base_dir, f"{prefix}_video_yolo_enriched.json.gz")
+                            fallback = os.path.join(base_dir, f"{clean_prefix}_video_yolo_enriched.json.gz")
+                            if os.path.exists(fallback):
+                                enriched_path = fallback
                         
-                        dfs["AOI"] = pd.read_csv(aoi_path) if os.path.exists(aoi_path) else None
-                        dfs["Identity"] = pd.read_json(identity_path) if os.path.exists(identity_path) else None
-                        dfs["Enriched"] = self._load_and_flatten_enriched_json(enriched_path)
+                        dfs["AOI"] = smart_load("AOI Data", aoi_path, pd.read_csv, [("CSV", "*.csv")])
+                        dfs["Identity"] = smart_load("Identity Map", identity_path, pd.read_json, [("JSON", "*.json")])
+                        dfs["Enriched"] = smart_load("Enriched Data", enriched_path, self._load_and_flatten_enriched_json, [("JSON GZ", "*.json.gz")])
                         
                         # Caricamento del file YOLO Cropped (ora in formato CSV appiattito)
-                        dfs["YOLO_Cropped"] = pd.read_csv(yolo_cropped_path) if os.path.exists(yolo_cropped_path) else None
+                        dfs["YOLO_Cropped"] = smart_load("YOLO Cropped", yolo_cropped_path, pd.read_csv, [("CSV", "*.csv")])
                         
                         # Il file YOLO raw base (generato automaticamente come CSV)
-                        yolo_raw_path = os.path.join(base_dir, f"{prefix}_video_yolo.csv")
-                        dfs["YOLO"] = pd.read_csv(yolo_raw_path) if os.path.exists(yolo_raw_path) else None
+                        yolo_raw_path = os.path.join(base_dir, f"{clean_prefix}_video_yolo.csv")
+                        dfs["YOLO"] = smart_load("YOLO Raw", yolo_raw_path, pd.read_csv, [("CSV", "*.csv")])
 
                         # Caricamento Output Filtri I-VT (se presenti)
-                        fix_path = os.path.join(base_dir, f"{prefix}_FIXATIONS.csv")
-                        filt_path = os.path.join(base_dir, f"{prefix}_FILTERED.csv")
-                        dfs["Fixations"] = pd.read_csv(fix_path) if os.path.exists(fix_path) else None
-                        dfs["Filtered_Gaze"] = pd.read_csv(filt_path) if os.path.exists(filt_path) else None
+                        fix_path = os.path.join(base_dir, f"{gaze_prefix}_FIXATIONS.csv")
+                        filt_path = os.path.join(base_dir, f"{gaze_prefix}_FILTERED.csv")
+                        dfs["Fixations"] = smart_load("Fixations", fix_path, pd.read_csv, [("CSV", "*.csv")])
+                        dfs["Filtered_Gaze"] = smart_load("Filtered Gaze", filt_path, pd.read_csv, [("CSV", "*.csv")])
 
-                        default_excel_name = os.path.join(base_dir, f"{prefix}_MASTER_REPORT.xlsx")
+                        default_excel_name = os.path.join(base_dir, f"{gaze_prefix}_MASTER_REPORT.xlsx")
                         self.parent.after(0, lambda: self._save_master_results(dfs, default_excel_name))
 
                     else:
@@ -692,7 +758,23 @@ class GazeStatsView:
         if out:
             try:
                 self.logic.export_master_report(out, dfs_dict)
-                messagebox.showinfo("Success", f"Master Report saved successfully.\nPath: {out}")
+                
+                # Also export CSVs automatically
+                base = os.path.splitext(out)[0]
+                if base.endswith("_MASTER_REPORT"):
+                    base = base[:-14]
+                
+                msg_extra = ""
+                if "Stats_Summary" in dfs_dict and dfs_dict["Stats_Summary"] is not None:
+                    p = f"{base}_FINAL_STATS.csv"
+                    dfs_dict["Stats_Summary"].to_csv(p, index=False)
+                    msg_extra += f"\n- {os.path.basename(p)}"
+                if "Stats_Raw" in dfs_dict and dfs_dict["Stats_Raw"] is not None:
+                    p = f"{base}_FINAL_STATS_RAW.csv"
+                    dfs_dict["Stats_Raw"].to_csv(p, index=False)
+                    msg_extra += f"\n- {os.path.basename(p)}"
+
+                messagebox.showinfo("Success", f"Master Report saved successfully.\nPath: {out}\n\nAlso exported CSVs:{msg_extra}")
             except Exception as e:
                 messagebox.showerror("Save Error", f"Failed to save Master Report: {str(e)}")
         
