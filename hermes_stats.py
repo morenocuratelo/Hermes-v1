@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
-from typing import Any, Dict, cast
+from typing import Any, Dict
 import pandas as pd
 import numpy as np
 import os
@@ -420,7 +420,8 @@ class StatsLogic:
                                     # Check if series is actually a Series (not DataFrame due to duplicate cols)
                                     if isinstance(series, pd.Series):
                                         max_val_len = series.astype(str).map(len).max()
-                                        if pd.isna(max_val_len): max_val_len = 0
+                                        if pd.isna(max_val_len):
+                                            max_val_len = 0
                                 
                                 col_header_len = len(str(col))
                                 column_len = max(int(max_val_len), int(col_header_len)) + 2

@@ -1,0 +1,62 @@
+[project]
+name = "hermes"
+version = "1.0.0"
+description = "H.E.R.M.E.S. - Human-centric Eye-tracking & Robust Motion Estimation Suite"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy",
+    "pandas",
+    "opencv-python",
+    "ultralytics",
+    "scipy",
+    "xlsxwriter",
+    "pillow",
+    # Dev & Linting tools
+    "pre-commit",
+    "ruff",
+    "mypy",
+    "types-requests", # Stubs per mypy
+    "types-Pillow",   # Stubs per mypy
+]
+
+[tool.ruff]
+# Lunghezza riga: 120 è un buon compromesso per schermi moderni (Black usa 88, ma spesso è stretto)
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+# E, W: Errori di stile (Pycodestyle)
+# F: Errori logici (Pyflakes)
+# I: Ordinamento import (Isort)
+# B: Bug comuni (Flake8-bugbear)
+# UP: Sintassi moderna (Pyupgrade)
+# S: Sicurezza (Bandit) - Utile per evitare hardcoded passwords o eval() pericolosi
+select = ["E", "W", "F", "I", "B", "UP", "S"]
+
+# Ignora regole specifiche se necessario (es. S101 ignora l'uso di 'assert')
+ignore = []
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+# Fondamentale: ignora errori se una libreria terza non ha i tipi (es. cv2, tkinter)
+ignore_missing_imports = true
+# Controlla il corpo delle funzioni anche se non sono tipizzate esplicitamente
+check_untyped_defs = true
+# Se vuoi essere molto rigido, imposta questo a true (obbliga a tipizzare tutto)
+disallow_untyped_defs = false
+
+# Override specifici per librerie note per non avere stubs completi
+[[tool.mypy.overrides]]
+module = ["cv2.*", "pandas.*", "tkinter.*", "scipy.*", "ultralytics.*", "PIL.*"]
+ignore_missing_imports = true

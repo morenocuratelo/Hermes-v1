@@ -115,7 +115,22 @@ The software is built on **Python 3.12** and leverages **Tkinter** for the graph
 
 ---
 
-## 📄 Citation and Disclaimer
+## 🐞 Debugging Tools
+
+The suite includes dedicated scripts for diagnostics and code validation:
+
+1.  **Hermes Diagnostics (`hermes_diagnostics.py`):** Analyzes input files (CSV, MAT, JSON) to detect format errors.
+    *   *Usage:* `python hermes_diagnostics.py`
+2.  **Architecture Validator (`hermes_architecture_validator.py`):** Verifies the separation between Logic and GUI.
+    *   *Usage:* `python hermes_architecture_validator.py`
+3.  **Logic Smoke Test (`hermes_logic_test.py`):** Unit tests for logic components.
+    *   *Usage:* `python hermes_logic_test.py`
+
+For full documentation, see `docs/hermes_debug_tools.md`.
+
+---
+
+## � Citation and Disclaimer
 
 If you use HERMES in your research, please refer to the internal laboratory documentation for the appropriate citation format.
 

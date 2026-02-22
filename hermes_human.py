@@ -550,6 +550,7 @@ class YoloView:
     def __init__(self, parent, context):
         self.parent = parent    
         self.context = context 
+        self.logic = PoseEstimatorLogic()
         
         # Variabili Locali
         self.video_path = tk.StringVar()
@@ -796,8 +797,7 @@ class YoloView:
         }
         
         try:
-            logic = PoseEstimatorLogic()
-            success = logic.run_analysis(
+            success = self.logic.run_analysis(
                 config, 
                 on_progress=self._update_progress,
                 on_log=self._log_message,

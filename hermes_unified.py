@@ -32,7 +32,7 @@ def get_module_class(module_name, class_name):
 # Mappa dei moduli (Nome visualizzato -> (File, Classe))
 MODULES_MAP = {
     "1. HUMAN (Kinematic Extraction)": ("hermes_human", "YoloView"),
-    "2. MASTER TOI (Cut & Sync)":      ("hermes_master_toi", "TOIGeneratorView"),
+    "2. MASTER TOI (Cut & Sync)":      ("hermes_master_toi", "MasterToiView"),
     "3. ENTITY (ID Assignment)":       ("hermes_entity", "IdentityView"),
     "4. REGION (AOI Definition)":      ("hermes_region", "RegionView"),
     "5. EYE MAPPING":                  ("hermes_eye", "GazeView"),

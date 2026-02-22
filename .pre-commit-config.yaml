@@ -1,0 +1,18 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Ruff version. Assicurati che sia allineata con quella installata nel tuo venv
+    rev: v0.3.0
+    hooks:
+      # Linter (corregge automaticamente import e stile semplice)
+      - id: ruff
+        args: [ --fix ]
+      # Formatter (riscrive il codice per lo stile standard)
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        # Aggiungi qui eventuali dipendenze necessarie per i tipi, se mancano
+        additional_dependencies: []
+        args: [--config-file=pyproject.toml]

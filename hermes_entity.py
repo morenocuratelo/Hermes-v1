@@ -1196,7 +1196,8 @@ class IdentityView:
                         if 'det' in frame_data:
                             for i, det in enumerate(frame_data['det']):
                                 raw_tid = det.get('track_id')
-                                if raw_tid is None: raw_tid = -1
+                                if raw_tid is None:
+                                    raw_tid = -1
                                 tid = int(raw_tid)
                                 
                                 # Replicate synthetic ID logic for lookup (handle untracked/merged)

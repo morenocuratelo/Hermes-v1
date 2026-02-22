@@ -40,7 +40,8 @@ class FilterLogic:
         if self.df is None:
             raise ValueError("No data loaded")
 
-        if progress_callback: progress_callback("Preprocessing (Gap Fill & Noise)...")
+        if progress_callback:
+            progress_callback("Preprocessing (Gap Fill & Noise)...")
         
         # Lavoriamo su una copia per non distruggere i dati originali in memoria
         df = self.df.copy()
@@ -60,7 +61,8 @@ class FilterLogic:
         # 3. Noise Reduction
         if params['noise_reduction'] != 'None':
             window = int(params['noise_window'])
-            if window % 2 == 0: window += 1 # Deve essere dispari
+            if window % 2 == 0:
+                window += 1 # Deve essere dispari
             
             if params['noise_reduction'] == 'Moving Median':
                 df['Gaze_X'] = df['Gaze_X'].rolling(window=window, center=True, min_periods=1).median()
@@ -69,7 +71,8 @@ class FilterLogic:
                 df['Gaze_X'] = df['Gaze_X'].rolling(window=window, center=True, min_periods=1).mean()
                 df['Gaze_Y'] = df['Gaze_Y'].rolling(window=window, center=True, min_periods=1).mean()
 
-        if progress_callback: progress_callback("Calculating Angular Velocity...")
+        if progress_callback:
+            progress_callback("Calculating Angular Velocity...")
 
         # 4. Velocity Calculation (Angular)
         dt = df['Timestamp'].diff()
@@ -151,7 +154,8 @@ class FilterLogic:
         velocity = angles_deg / dt
         df['Velocity'] = velocity.fillna(0)
         
-        if progress_callback: progress_callback("Classifying Fixations...")
+        if progress_callback:
+            progress_callback("Classifying Fixations...")
 
         # 5. I-VT Classification
         threshold = params['velocity_threshold']
@@ -169,7 +173,8 @@ class FilterLogic:
         
         raw_fixations = []
         for _, group in fix_groups:
-            if group.empty: continue
+            if group.empty:
+                continue
             start_t = group['Timestamp'].min()
             end_t = group['Timestamp'].max()
             dur_ms = (end_t - start_t) * 1000
@@ -183,7 +188,8 @@ class FilterLogic:
                 'count': len(group)
             })
             
-        if progress_callback: progress_callback(f"Merging {len(raw_fixations)} candidates...")
+        if progress_callback:
+            progress_callback(f"Merging {len(raw_fixations)} candidates...")
 
         # 7. Merge Adjacent Fixations
         if params['merge_adjacent']:
@@ -239,7 +245,8 @@ class FilterLogic:
         return len(self.fixations)
 
     def save_fixations(self, path):
-        if not self.fixations: return
+        if not self.fixations:
+            return
         pd.DataFrame(self.fixations).to_csv(path, index=False)
 
     def save_filtered_data(self, path):
@@ -403,7 +410,13 @@ class FilterView:
         f.pack(fill=tk.X, pady=2)
         tk.Label(f, text=label, width=20, anchor="w", bg="white").pack(side=tk.LEFT)
         tk.Entry(f, textvariable=var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        cmd = lambda: self._browse_save(var, ft) if save else self._browse_open(var, ft)
+        
+        def cmd():
+            if save:
+                self._browse_save(var, ft)
+            else:
+                self._browse_open(var, ft)
+        
         tk.Button(f, text="...", width=3, command=cmd).pack(side=tk.LEFT)
 
     def _add_entry(self, parent, label, var):
@@ -419,7 +432,8 @@ class FilterView:
 
     def _browse_save(self, var, ft):
         f = filedialog.asksaveasfilename(filetypes=[("File", ft)], defaultextension=".csv")
-        if f: var.set(f)
+        if f:
+            var.set(f)
 
     def _suggest_outputs(self, input_path):
         base = os.path.splitext(input_path)[0].replace("_MAPPED", "")
@@ -468,7 +482,8 @@ class FilterView:
                     
                 self.parent.after(0, lambda: self._on_success(count))
             except Exception as e:
-                self.parent.after(0, lambda: self._on_error(str(e)))
+                err_msg = str(e)
+                self.parent.after(0, lambda: self._on_error(err_msg))
                 
         threading.Thread(target=worker, daemon=True).start()
 

@@ -27,16 +27,60 @@ class ProfileManager:
         with open(os.path.join(self.profiles_dir, filename), 'r') as f:
             return json.load(f)
         
+class ProfileWizardLogic:
+    """
+    Gestisce la logica di business per il Profile Wizard:
+    - Caricamento e parsing dei file di esempio (JSON/CSV).
+    - Costruzione e salvataggio della struttura dati del profilo.
+    """
+    def __init__(self, profiles_dir):
+        self.profiles_dir = profiles_dir
+        self.loaded_json_events = []
+        self.loaded_csv_columns = []
+
+    def load_json_sample(self, path):
+        with open(path, 'r') as f:
+            data = json.load(f)
+        
+        labels = set()
+        if isinstance(data, list):
+            for e in data:
+                if 'label' in e:
+                    labels.add(e['label'])
+        elif isinstance(data, dict):
+            if 'label' in data:
+                labels.add(data['label'])
+        
+        self.loaded_json_events = sorted(list(labels))
+        return self.loaded_json_events
+
+    def load_csv_sample(self, path):
+        # sep=None con engine='python' permette a pandas di indovinare se usare , o ; o \t
+        df = pd.read_csv(path, nrows=2, sep=None, engine='python')
+        self.loaded_csv_columns = [str(c).strip() for c in df.columns]
+        return self.loaded_csv_columns
+
+    def save_profile(self, profile_data):
+        if not os.path.exists(self.profiles_dir):
+            os.makedirs(self.profiles_dir)
+        
+        name = profile_data.get("name", "profile")
+        safe_name = "".join([c if c.isalnum() else "_" for c in name]).lower() + ".json"
+        path = os.path.join(self.profiles_dir, safe_name)
+        
+        with open(path, 'w') as f:
+            json.dump(profile_data, f, indent=4)
+        return path
+
 class ProfileWizard:
     def __init__(self, root, profiles_dir=None):
         self.root = root
-        self.profiles_dir = profiles_dir or "profiles"
+        profiles_dir = profiles_dir or "profiles"
+        self.logic = ProfileWizardLogic(profiles_dir)
+        
         self.root.title("Universal Profile Generator - Lab Modigliani")
         self.root.geometry("900x850")
         
-        # Variabili Dati Caricati
-        self.loaded_json_events = []
-        self.loaded_csv_columns = []
         
         # --- UI LAYOUT ---
         canvas = tk.Canvas(root)
@@ -172,25 +216,13 @@ class ProfileWizard:
         if not path:
             return
         try:
-            with open(path, 'r') as f:
-                data = json.load(f)
+            events = self.logic.load_json_sample(path)
             
-            # Estrai label uniche
-            labels = set()
-            if isinstance(data, list):
-                for e in data:
-                    if 'label' in e:
-                        labels.add(e['label'])
-            elif isinstance(data, dict):
-                if 'label' in data:
-                    labels.add(data['label'])
-            
-            self.loaded_json_events = sorted(list(labels))
-            self.combo_tobii_event['values'] = self.loaded_json_events
-            if self.loaded_json_events:
+            self.combo_tobii_event['values'] = events
+            if events:
                 self.combo_tobii_event.current(0)
             
-            self.lbl_json_status.config(text=f"OK! Trovati {len(labels)} eventi.", fg="green")
+            self.lbl_json_status.config(text=f"OK! Trovati {len(events)} eventi.", fg="green")
         except Exception as e:
             messagebox.showerror("Errore JSON", str(e))
 
@@ -200,40 +232,35 @@ class ProfileWizard:
             return
         
         try:
-            # --- MODIFICA CRITICA: Rilevamento automatico separatore ---
-            # sep=None con engine='python' permette a pandas di indovinare se usare , o ; o \t
-            df = pd.read_csv(path, nrows=2, sep=None, engine='python')
+            columns = self.logic.load_csv_sample(path)
             
-            # Pulizia nomi colonne (rimuove spazi vuoti extra che spesso Matlab lascia)
-            self.loaded_csv_columns = [str(c).strip() for c in df.columns]
-            
-            print(f"DEBUG - Colonne trovate: {self.loaded_csv_columns}") # Controllo console
+            print(f"DEBUG - Colonne trovate: {columns}") # Controllo console
 
             # 1. Popola menu Anchor Matlab (Sezione 2)
-            self.combo_matlab_anchor['values'] = self.loaded_csv_columns
-            if self.loaded_csv_columns:
+            self.combo_matlab_anchor['values'] = columns
+            if columns:
                 # Cerca di indovinare se c'è una colonna 'baseline'
-                default_idx = next((i for i, c in enumerate(self.loaded_csv_columns) if 'baseline' in c.lower()), 0)
+                default_idx = next((i for i, c in enumerate(columns) if 'baseline' in c.lower()), 0)
                 self.combo_matlab_anchor.current(default_idx)
 
             # 2. Popola menu Condizione (Sezione 3 - Quello che non ti funzionava)
-            self.combo_cond_col['values'] = self.loaded_csv_columns
-            if self.loaded_csv_columns:
+            self.combo_cond_col['values'] = columns
+            if columns:
                 # Cerca di selezionare automaticamente "Condition" se esiste
-                cond_idx = next((i for i, c in enumerate(self.loaded_csv_columns) if 'cond' in c.lower()), 0)
+                cond_idx = next((i for i, c in enumerate(columns) if 'cond' in c.lower()), 0)
                 self.combo_cond_col.current(cond_idx)
 
             # 3. Popola lista colonne disponibili (Sezione 3)
             self.lb_avail.delete(0, tk.END)
-            for c in self.loaded_csv_columns:
+            for c in columns:
                 self.lb_avail.insert(tk.END, c)
             
             # 4. Popola Anchor Fasi Fisse (Sezione 4)
-            fixed_opts = ["auto (Fine ultima fase)"] + self.loaded_csv_columns
+            fixed_opts = ["auto (Fine ultima fase)"] + columns
             self.combo_fixed_anchor['values'] = fixed_opts
             self.combo_fixed_anchor.current(0)
 
-            self.lbl_csv_status.config(text=f"OK! Trovate {len(self.loaded_csv_columns)} colonne.", fg="green")
+            self.lbl_csv_status.config(text=f"OK! Trovate {len(columns)} colonne.", fg="green")
             
         except Exception as e:
             print(f"Errore caricamento CSV: {e}")
@@ -313,17 +340,8 @@ class ProfileWizard:
             }
         }
 
-        # Salvataggio nella cartella del progetto (profiles_toi)
-        if not os.path.exists(self.profiles_dir):
-            os.makedirs(self.profiles_dir)
-        
-        # Sanitize filename
-        safe_name = "".join([c if c.isalnum() else "_" for c in p_name]).lower() + ".json"
-        path = os.path.join(self.profiles_dir, safe_name)
-        
         try:
-            with open(path, 'w') as f:
-                json.dump(profile_data, f, indent=4)
+            path = self.logic.save_profile(profile_data)
             messagebox.showinfo("Successo", f"Profilo salvato correttamente in:\n{path}")
         except Exception as e:
             messagebox.showerror("Errore Salvataggio", str(e))
@@ -521,7 +539,25 @@ class TOIGenerator:
         out_df.to_csv(output_path, index=False, sep='\t')
         return len(toi_rows)
 
-class TOIGeneratorView:
+class MasterToiLogic:
+    """
+    Logica per la vista Master TOI.
+    Collega il ProfileManager, il TOIGenerator e il DataCropper.
+    """
+    def __init__(self, profile_manager):
+        self.pm = profile_manager
+
+    def get_available_profiles(self):
+        return self.pm.get_available_profiles()
+
+    def generate_toi(self, matlab_path, tobii_path, profile_name, output_path):
+        prof = self.pm.load_profile(profile_name)
+        return TOIGenerator.process(matlab_path, tobii_path, prof, output_path)
+
+    def crop_data(self, raw_path, toi_path):
+        return DataCropper.crop_yolo_json(raw_path, toi_path)
+
+class MasterToiView:
     def __init__(self, parent, context=None):
         self.parent = parent
         self.context = context
@@ -533,6 +569,7 @@ class TOIGeneratorView:
             p_dir = "profiles_toi_fallback"
             
         self.pm = ProfileManager(profiles_dir=p_dir)
+        self.logic = MasterToiLogic(self.pm)
         
         # Variabili UI
         self.tobii_file = tk.StringVar()
@@ -642,7 +679,7 @@ class TOIGeneratorView:
 
     # --- LOGICA (Invariata) ---
     def refresh_profiles(self):
-        v = self.pm.get_available_profiles()
+        v = self.logic.get_available_profiles()
         self.cb['values'] = v
         if v:
             self.selected_profile.set(v[0])
@@ -671,8 +708,7 @@ class TOIGeneratorView:
             messagebox.showwarning("Warning", "Select a profile before proceeding.")
             return
         try:
-            prof = self.pm.load_profile(self.selected_profile.get())
-            n = TOIGenerator.process(self.matlab_file.get(), self.tobii_file.get(), prof, self.output_file.get())
+            n = self.logic.generate_toi(self.matlab_file.get(), self.tobii_file.get(), self.selected_profile.get(), self.output_file.get())
             if self.context:
                 self.context.toi_path = self.output_file.get()
             messagebox.showinfo("Success", f"Generated {n} TOI intervals.\nYou can now proceed to optimization (Step C) if needed.")
@@ -698,7 +734,7 @@ class TOIGeneratorView:
             messagebox.showwarning("Missing File", "TOI file not found. Run Step B (Generate) first.")
             return
             
-        cropped_path = DataCropper.crop_yolo_json(raw_in, toi_in)
+        cropped_path = self.logic.crop_data(raw_in, toi_in)
         
         if cropped_path:
             if self.context:

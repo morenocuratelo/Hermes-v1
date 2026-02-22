@@ -125,6 +125,21 @@ Il software è costruito su **Python 3.12** e utilizza **Tkinter** per l'interfa
 
 ---
 
+## 🐞 Strumenti di Debug
+
+La suite include script dedicati per la diagnostica e la validazione del codice:
+
+1.  **Hermes Diagnostics (`hermes_diagnostics.py`):** Analizza file di input (CSV, MAT, JSON) per rilevare errori di formato.
+    *   *Uso:* `python hermes_diagnostics.py`
+2.  **Architecture Validator (`hermes_architecture_validator.py`):** Verifica la separazione tra Logica e GUI.
+    *   *Uso:* `python hermes_architecture_validator.py`
+3.  **Logic Smoke Test (`hermes_logic_test.py`):** Test unitari per i componenti logici.
+    *   *Uso:* `python hermes_logic_test.py`
+
+Per la documentazione completa, vedi `docs/hermes_debug_tools.md`.
+
+---
+
 ## 📄 Citazione e Disclaimer
 
 Se utilizzi HERMES nella tua ricerca, fai riferimento alla documentazione interna del laboratorio per il formato di citazione appropriato.
