@@ -355,7 +355,7 @@ class TOIGenerator:
             if pd.isna(time_str):
                 return None
             # If data comes from .mat, it might already be a float/int
-            if isinstance(time_str, (float, int)):
+            if isinstance(time_str, float | int):
                 return float(time_str)
             time_str = str(time_str).strip()
             formats = ["%H:%M:%S.%f", "%H:%M:%S"]
@@ -408,7 +408,7 @@ class TOIGenerator:
                     return pd.DataFrame(data_var[0]) 
                     
             except Exception as e:
-                raise ValueError(f"Failed to parse .mat file: {e}")
+                raise ValueError(f"Failed to parse .mat file: {e}") from e
         
         else:
             raise ValueError(f"Unsupported format: {ext}")
@@ -437,7 +437,7 @@ class TOIGenerator:
             print(f"Tobii Sync Point ({target_label}): {tobii_ts}s")
             
         except Exception as e:
-            raise ValueError(f"Tobii JSON Error: {e}")
+            raise ValueError(f"Tobii JSON Error: {e}") from e
 
         # 2. Load Matlab Data (CSV or MAT) <--- MODIFIED SECTION
         try:
@@ -445,7 +445,7 @@ class TOIGenerator:
             # Ensure column names are stripped of whitespace if loaded from loose CSVs
             df.columns = df.columns.astype(str).str.strip()
         except Exception as e:
-            raise ValueError(f"Matlab Data Load Error: {e}")
+            raise ValueError(f"Matlab Data Load Error: {e}") from e
 
         # 3. Estrai configurazione Profilo
         struct = profile.get('csv_structure', {})

@@ -1,32 +1,47 @@
-import tkinter as tk
-from tkinter import filedialog, ttk, messagebox
-import cv2
-import json
-import gzip
-import os
-import math
 import bisect
 import copy
+import gzip
+import json
+import math
+import os
 import threading
+import tkinter as tk
+from datetime import datetime
+from tkinter import filedialog, messagebox, ttk
+
+import cv2
 import pandas as pd
 from PIL import Image, ImageTk
-from datetime import datetime
 
 # ═══════════════════════════════════════════════════════════════════
 # CONSTANTS
 # ═══════════════════════════════════════════════════════════════════
 
 KEYPOINTS_MAP = {
-    0: "Nose", 1: "L_Eye", 2: "R_Eye", 3: "L_Ear", 4: "R_Ear",
-    5: "L_Shoulder", 6: "R_Shoulder", 7: "L_Elbow", 8: "R_Elbow",
-    9: "L_Wrist", 10: "R_Wrist", 11: "L_Hip", 12: "R_Hip",
-    13: "L_Knee", 14: "R_Knee", 15: "L_Ankle", 16: "R_Ankle"
+    0: "Nose",
+    1: "L_Eye",
+    2: "R_Eye",
+    3: "L_Ear",
+    4: "R_Ear",
+    5: "L_Shoulder",
+    6: "R_Shoulder",
+    7: "L_Elbow",
+    8: "R_Elbow",
+    9: "L_Wrist",
+    10: "R_Wrist",
+    11: "L_Hip",
+    12: "R_Hip",
+    13: "L_Knee",
+    14: "R_Knee",
+    15: "L_Ankle",
+    16: "R_Ankle",
 }
 
 
 # ═══════════════════════════════════════════════════════════════════
 # PROFILE MANAGER — I/O for AOI profile JSON files
 # ═══════════════════════════════════════════════════════════════════
+
 
 class AOIProfileManager:
     def __init__(self, folder="profiles_aoi"):
@@ -37,29 +52,35 @@ class AOIProfileManager:
             "name": "BW Invasion Granular",
             "roles": {
                 "Target": [
-                    {"name": "Face",   "shape": "box", "kps": [0,1,2,3,4],     "margin_px": 30, "expand_factor": 1.0},
-                    {"name": "Torso",  "shape": "box", "kps": [5,6,11,12],     "margin_px": 20, "expand_factor": 1.0},
-                    {"name": "Arms",   "shape": "box", "kps": [7,8,9,10],      "margin_px": 20, "expand_factor": 1.0},
-                    {"name": "Legs",   "shape": "box", "kps": [13,14,15,16],   "margin_px": 20, "expand_factor": 1.0},
-                    {"name": "Peripersonal", "shape": "box", "kps": list(range(17)), "margin_px": 0, "expand_factor": 3.0},
+                    {"name": "Face", "shape": "box", "kps": [0, 1, 2, 3, 4], "margin_px": 30, "expand_factor": 1.0},
+                    {"name": "Torso", "shape": "box", "kps": [5, 6, 11, 12], "margin_px": 20, "expand_factor": 1.0},
+                    {"name": "Arms", "shape": "box", "kps": [7, 8, 9, 10], "margin_px": 20, "expand_factor": 1.0},
+                    {"name": "Legs", "shape": "box", "kps": [13, 14, 15, 16], "margin_px": 20, "expand_factor": 1.0},
+                    {
+                        "name": "Peripersonal",
+                        "shape": "box",
+                        "kps": list(range(17)),
+                        "margin_px": 0,
+                        "expand_factor": 3.0,
+                    },
                 ],
                 "DEFAULT": [
                     {"name": "FullBody", "shape": "box", "kps": list(range(17)), "margin_px": 20, "expand_factor": 1.0}
-                ]
-            }
+                ],
+            },
         }
         self.save_profile("default_invasion.json", profile)
         return profile
 
     def load_profile(self, name):
         try:
-            with open(os.path.join(self.folder, name), 'r') as f:
+            with open(os.path.join(self.folder, name)) as f:
                 return json.load(f)
         except Exception:
             return {}
 
     def save_profile(self, name, data):
-        with open(os.path.join(self.folder, name), 'w') as f:
+        with open(os.path.join(self.folder, name), "w") as f:
             json.dump(data, f, indent=4)
 
     def list_profiles(self):
@@ -67,9 +88,11 @@ class AOIProfileManager:
             return []
         return [f for f in os.listdir(self.folder) if f.endswith(".json")]
 
+
 # ═══════════════════════════════════════════════════════════════════
 # MODEL — Pure logic, no tkinter
 # ═══════════════════════════════════════════════════════════════════
+
 
 class RegionLogic:
     """
@@ -81,8 +104,8 @@ class RegionLogic:
     IGNORED_ROLES = {"Ignore", "Noise", "Unknown"}
 
     def __init__(self):
-        self.pose_data = {}      # { frame_idx: { track_id: [[x,y,conf], ...] } }
-        self.identity_map = {}   # { "track_id_str": "RoleName" }
+        self.pose_data = {}  # { frame_idx: { track_id: [[x,y,conf], ...] } }
+        self.identity_map = {}  # { "track_id_str": "RoleName" }
         # {(frame_idx, track_id, role, aoi_name): (x1, y1, x2, y2)}
         self.manual_overrides = {}
         self.total_frames = 0
@@ -112,28 +135,28 @@ class RegionLogic:
         if progress_callback:
             progress_callback(f"Loading poses: {os.path.basename(path)}")
 
-        with gzip.open(path, 'rt', encoding='utf-8') as file:
+        with gzip.open(path, "rt", encoding="utf-8") as file:
             for line_num, line in enumerate(file):
                 if self._cancel_flag:
                     raise InterruptedError("Pose loading cancelled by user.")
 
                 d = json.loads(line)
-                f_idx = d['f_idx']
+                f_idx = d["f_idx"]
                 frame_dict = {}
 
-                for i, det in enumerate(d['det']):
-                    if 'keypoints' not in det:
+                for i, det in enumerate(d["det"]):
+                    if "keypoints" not in det:
                         continue
 
                     # Hybrid Import: Check for enriched data (Master ID & Role)
-                    master_id = det.get('master_id')
-                    role = det.get('role')
+                    master_id = det.get("master_id")
+                    role = det.get("role")
 
                     if master_id is not None:
                         tid = int(master_id)
                     else:
                         # Legacy/Raw YOLO behavior
-                        raw_tid = det.get('track_id', -1)
+                        raw_tid = det.get("track_id", -1)
                         if raw_tid is None:
                             raw_tid = -1
                         tid = int(raw_tid)
@@ -145,11 +168,11 @@ class RegionLogic:
                         self.identity_map[str(tid)] = role
 
                     # Parse keypoints (support both dict and list formats)
-                    raw_kps = det['keypoints']
+                    raw_kps = det["keypoints"]
                     final_kps = []
-                    if isinstance(raw_kps, dict) and 'x' in raw_kps:
-                        xs, ys = raw_kps['x'], raw_kps['y']
-                        confs = raw_kps.get('visible', raw_kps.get('confidence', [1.0] * len(xs)))
+                    if isinstance(raw_kps, dict) and "x" in raw_kps:
+                        xs, ys = raw_kps["x"], raw_kps["y"]
+                        confs = raw_kps.get("visible", raw_kps.get("confidence", [1.0] * len(xs)))
                         for k in range(len(xs)):
                             final_kps.append([xs[k], ys[k], confs[k] if k < len(confs) else 0])
                     elif isinstance(raw_kps, list):
@@ -175,7 +198,7 @@ class RegionLogic:
 
     def load_identity_map(self, path):
         """Load the identity JSON and return the number of mapped IDs."""
-        with open(path, 'r') as f:
+        with open(path) as f:
             self.identity_map = json.load(f)
         return len(self.identity_map)
 
@@ -200,14 +223,14 @@ class RegionLogic:
         tuple(int, int, int, int) | None
             (x1, y1, x2, y2) or None if insufficient keypoints.
         """
-        indices = rule.get('kps', [])
+        indices = rule.get("kps", [])
         xs, ys = [], []
 
         for i in indices:
             if i >= len(kps_data):
                 continue
             pt = kps_data[i]
-            x, y, conf = 0, 0, 0
+            x, y, conf = 0.0, 0.0, 0.0
             if isinstance(pt, list):
                 if len(pt) >= 2:
                     x, y = pt[0], pt[1]
@@ -228,16 +251,16 @@ class RegionLogic:
         min_y, max_y = min(ys), max(ys)
 
         # 1. Uniform margin padding
-        m = int(rule.get('margin_px', 0))
+        m = int(rule.get("margin_px", 0))
         min_x -= m
         max_x += m
         min_y -= m
         max_y += m
 
         # 2. Independent width/height scaling from centre
-        base_exp = float(rule.get('expand_factor', 1.0))
-        scale_w = float(rule.get('scale_w', base_exp))
-        scale_h = float(rule.get('scale_h', base_exp))
+        base_exp = float(rule.get("expand_factor", 1.0))
+        scale_w = float(rule.get("scale_w", base_exp))
+        scale_h = float(rule.get("scale_h", base_exp))
 
         w = max_x - min_x
         h = max_y - min_y
@@ -253,8 +276,8 @@ class RegionLogic:
         max_y = cy + new_h / 2
 
         # 3. Bottom offset AFTER expansion (so N px always means N real px)
-        if 'offset_y_bottom' in rule:
-            max_y += int(rule['offset_y_bottom'])
+        if "offset_y_bottom" in rule:
+            max_y += int(rule["offset_y_bottom"])
 
         # 4. Clamp to non-negative coordinates
         min_x = max(0, min_x)
@@ -269,7 +292,7 @@ class RegionLogic:
             if i >= len(kps_data):
                 continue
             pt = kps_data[i]
-            x, y, conf = 0, 0, 0
+            x, y, conf = 0.0, 0.0, 0.0
             if isinstance(pt, list):
                 if len(pt) >= 2:
                     x, y = pt[0], pt[1]
@@ -366,7 +389,7 @@ class RegionLogic:
 
         Supported rule['shape']: box, polygon, circle, oval.
         """
-        indices = rule.get('kps', [])
+        indices = rule.get("kps", [])
         if not indices:
             return None
 
@@ -400,9 +423,9 @@ class RegionLogic:
     @staticmethod
     def _get_rules(profile, role):
         """Safely retrieve AOI rules for a role, with DEFAULT fallback."""
-        if not profile or 'roles' not in profile:
+        if not profile or "roles" not in profile:
             return []
-        return profile['roles'].get(role, profile['roles'].get("DEFAULT", []))
+        return profile["roles"].get(role, profile["roles"].get("DEFAULT", []))
 
     @staticmethod
     def _override_key(frame_idx, track_id, role, aoi_name):
@@ -410,7 +433,7 @@ class RegionLogic:
 
     @staticmethod
     def _sanitize_box(box):
-        x1, y1, x2, y2 = [int(v) for v in box]
+        x1, y1, x2, y2 = (int(v) for v in box)
         x1 = max(0, x1)
         y1 = max(0, y1)
         x2 = max(x1 + 1, x2)
@@ -440,52 +463,52 @@ class RegionLogic:
         Search for tracks present in neighboring frames but missing in the current frame.
         Returns a list of ghost items with a suggested box from the nearest valid frame.
         """
-        ghosts = []
-        if not profile or 'roles' not in profile:
+        ghosts: list[dict] = []
+        if not profile or "roles" not in profile:
             return ghosts
 
         with self.lock:
             # 1. Identify what is already present/generated in the current frame.
             # get_frame_aoi_data already applies priority: manual override > YOLO.
             current_aois = self.get_frame_aoi_data(frame_idx, profile, kp_conf_thresh)
-            existing_keys = set((a['track_id'], a['aoi']) for a in current_aois)
-            
-            found_ghosts = {} 
+            existing_keys = set((a["track_id"], a["aoi"]) for a in current_aois)
+
+            found_ghosts = {}
 
             # Search range: +/- window_frames, sorted by distance (nearest first)
             offsets = sorted(range(-window_frames, window_frames + 1), key=abs)
-            
+
             for offset in offsets:
                 if offset == 0:
                     continue
-                
+
                 neighbor_idx = frame_idx + offset
                 if neighbor_idx not in self.pose_data:
                     continue
-                
+
                 n_poses = self.pose_data[neighbor_idx]
-                
+
                 for tid, kps in n_poses.items():
                     role = self.identity_map.get(str(tid), "Unknown")
                     if role in self.IGNORED_ROLES:
                         continue
-                        
+
                     rules = self._get_rules(profile, role)
                     for rule in rules:
-                        aoi_name = rule['name']
+                        aoi_name = rule["name"]
                         key = (tid, aoi_name)
-                        
+
                         if key in existing_keys:
                             continue
                         if key in found_ghosts:
                             continue
-                            
+
                         # Try to calculate box in neighbor frame to use as suggestion
                         shape = self.calculate_shape(kps, rule, kp_conf_thresh)
                         if shape:
                             found_ghosts[key] = {
                                 "box": shape["box"],
-                                "color": (128, 128, 128), # Grey for ghost
+                                "color": (128, 128, 128),  # Grey for ghost
                                 "label": f"{role}:{aoi_name} (Ghost)",
                                 "track_id": tid,
                                 "role": role,
@@ -493,11 +516,11 @@ class RegionLogic:
                                 "corrected": False,
                                 "shape_type": shape.get("shape_type", "box"),
                                 "is_ghost": True,
-                                "source_frame": neighbor_idx
+                                "source_frame": neighbor_idx,
                             }
-            
+
             ghosts = list(found_ghosts.values())
-            ghosts.sort(key=lambda x: x['track_id'])
+            ghosts.sort(key=lambda x: x["track_id"])
             return ghosts
 
     def get_frame_aoi_data(self, frame_idx, profile, kp_conf_thresh=0.3):
@@ -509,15 +532,13 @@ class RegionLogic:
         list[dict]
             Each item has: frame, track_id, role, aoi, box, corrected.
         """
-        items = []
-        if not profile or 'roles' not in profile:
+        items: list[dict] = []
+        if not profile or "roles" not in profile:
             return items
 
         with self.lock:
             frame_poses = dict(self.pose_data.get(frame_idx, {}))
-            frame_overrides = {
-                k: v for k, v in self.manual_overrides.items() if k[0] == int(frame_idx)
-            }
+            frame_overrides = {k: v for k, v in self.manual_overrides.items() if k[0] == int(frame_idx)}
 
         processed_override_keys = set()
 
@@ -530,7 +551,7 @@ class RegionLogic:
 
                 rules = self._get_rules(profile, role)
                 for rule in rules:
-                    key = self._override_key(frame_idx, tid, role, rule['name'])
+                    key = self._override_key(frame_idx, tid, role, rule["name"])
 
                     if key in frame_overrides:
                         # PRIORITY 1: manual override is absolute; ignore pose-derived geometry.
@@ -554,7 +575,7 @@ class RegionLogic:
                         "frame": int(frame_idx),
                         "track_id": int(tid),
                         "role": role,
-                        "aoi": rule['name'],
+                        "aoi": rule["name"],
                         "shape_type": shape.get("shape_type", "box"),
                         "box": shape["box"],
                         "corrected": corrected,
@@ -568,16 +589,16 @@ class RegionLogic:
         for key, box in frame_overrides.items():
             if key in processed_override_keys:
                 continue
-            
+
             _, tid, role, aoi_name = key
-            
+
             # Infer shape type from profile since we don't have base_shape
             rules = self._get_rules(profile, role)
-            target_rule = next((r for r in rules if r['name'] == aoi_name), None)
-            shape_type = target_rule.get('shape', 'box') if target_rule else 'box'
-            
+            target_rule = next((r for r in rules if r["name"] == aoi_name), None)
+            shape_type = target_rule.get("shape", "box") if target_rule else "box"
+
             shape = self._shape_from_box(shape_type, box)
-            
+
             row = {
                 "frame": int(frame_idx),
                 "track_id": int(tid),
@@ -591,7 +612,7 @@ class RegionLogic:
                 if extra_key in shape:
                     row[extra_key] = shape[extra_key]
             items.append(row)
-            
+
         return items
 
     # ── Render Data (for View) ──────────────────────────────────
@@ -612,16 +633,18 @@ class RegionLogic:
                 color = (0, 220, 0)
             else:
                 color = (255, 0, 255) if aoi["aoi"] == "Peripersonal" else (0, 255, 255)
-            items.append({
-                "box": aoi["box"],
-                "color": color,
-                "label": f"{aoi['role']}:{aoi['aoi']}",
-                "track_id": aoi["track_id"],
-                "role": aoi["role"],
-                "aoi": aoi["aoi"],
-                "corrected": aoi["corrected"],
-                "shape_type": aoi.get("shape_type", "box"),
-            })
+            items.append(
+                {
+                    "box": aoi["box"],
+                    "color": color,
+                    "label": f"{aoi['role']}:{aoi['aoi']}",
+                    "track_id": aoi["track_id"],
+                    "role": aoi["role"],
+                    "aoi": aoi["aoi"],
+                    "corrected": aoi["corrected"],
+                    "shape_type": aoi.get("shape_type", "box"),
+                }
+            )
             for extra_key in ("points", "cx", "cy", "radius", "rx", "ry", "angle"):
                 if extra_key in aoi:
                     items[-1][extra_key] = aoi[extra_key]
@@ -643,7 +666,7 @@ class RegionLogic:
         lines.append(f"FRAME DIAGNOSTICS {frame_idx}")
         lines.append("=" * 40)
 
-        if not profile or 'roles' not in profile:
+        if not profile or "roles" not in profile:
             lines.append("❌ NO PROFILE loaded (profile is empty or missing 'roles').")
             return "\n".join(lines)
 
@@ -671,7 +694,7 @@ class RegionLogic:
                 continue
 
             rules = self._get_rules(profile, role)
-            if role not in profile['roles']:
+            if role not in profile["roles"]:
                 lines.append(f"   ℹ️ INFO: Role '{role}' not in profile. Using 'DEFAULT'.")
 
             for rule in rules:
@@ -681,7 +704,7 @@ class RegionLogic:
                     lines.append(f"   ✅ AOI '{rule['name']}' ({shp}): Box {shape['box']}")
                 else:
                     lines.append(f"   ❌ AOI '{rule['name']}': Failed (Insufficient keypoints or low conf)")
-                    indices = rule.get('kps', [])
+                    indices = rule.get("kps", [])
                     valid_pts = 0
                     for i in indices:
                         if i < len(kps):
@@ -697,8 +720,7 @@ class RegionLogic:
 
     # ── CSV Export ──────────────────────────────────────────────
 
-    def export_csv(self, output_path, profile, kp_conf_thresh=0.3,
-                   progress_callback=None, profile_for_frame_fn=None):
+    def export_csv(self, output_path, profile, kp_conf_thresh=0.3, progress_callback=None, profile_for_frame_fn=None):
         """
         Iterate over all frames and export AOI bounding boxes to CSV.
 
@@ -717,7 +739,7 @@ class RegionLogic:
         """
         self._cancel_flag = False
 
-        if not profile or 'roles' not in profile:
+        if not profile or "roles" not in profile:
             raise ValueError("Cannot export: no valid AOI profile loaded.")
 
         rows = []
@@ -738,24 +760,28 @@ class RegionLogic:
                 b = aoi["box"]
                 shape_type = aoi.get("shape_type", "box")
                 shape_points = json.dumps(aoi.get("points", [])) if shape_type == "polygon" else ""
-                rows.append({
-                    "Frame": f_idx,
-                    "Timestamp": round(f_idx / self.fps, 4),
-                    "TrackID": aoi["track_id"],
-                    "Role": aoi["role"],
-                    "AOI": aoi["aoi"],
-                    "ShapeType": shape_type,
-                    "ShapePoints": shape_points,
-                    "CenterX": aoi.get("cx", -1),
-                    "CenterY": aoi.get("cy", -1),
-                    "Radius": aoi.get("radius", -1),
-                    "RadiusX": aoi.get("rx", -1),
-                    "RadiusY": aoi.get("ry", -1),
-                    "Angle": aoi.get("angle", 0),
-                    "x1": b[0], "y1": b[1],
-                    "x2": b[2], "y2": b[3],
-                    "Corrected": int(aoi["corrected"]),
-                })
+                rows.append(
+                    {
+                        "Frame": f_idx,
+                        "Timestamp": round(f_idx / self.fps, 4),
+                        "TrackID": aoi["track_id"],
+                        "Role": aoi["role"],
+                        "AOI": aoi["aoi"],
+                        "ShapeType": shape_type,
+                        "ShapePoints": shape_points,
+                        "CenterX": aoi.get("cx", -1),
+                        "CenterY": aoi.get("cy", -1),
+                        "Radius": aoi.get("radius", -1),
+                        "RadiusX": aoi.get("rx", -1),
+                        "RadiusY": aoi.get("ry", -1),
+                        "Angle": aoi.get("angle", 0),
+                        "x1": b[0],
+                        "y1": b[1],
+                        "x2": b[2],
+                        "y2": b[3],
+                        "Corrected": int(aoi["corrected"]),
+                    }
+                )
 
             if progress_callback and count % 500 == 0:
                 progress_callback(f"Exporting… {count}/{total} frames")
@@ -766,6 +792,7 @@ class RegionLogic:
             progress_callback(f"Export complete: {len(rows)} rows.")
 
         return len(rows)
+
 
 class TOITimelineWidget(tk.Canvas):
     """Timeline with TOI epochs and playhead."""
@@ -783,20 +810,22 @@ class TOITimelineWidget(tk.Canvas):
         self.duration = max(0.0, float(duration))
         self.tois = []
         if df_tois is not None and not df_tois.empty:
-            colors = ['#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99', '#e31a1c', '#fdbf6f']
-            cond_map = {}
+            colors = ["#a6cee3", "#1f78b4", "#b2df8a", "#33a02c", "#fb9a99", "#e31a1c", "#fdbf6f"]
+            cond_map: dict[str, str] = {}
             for _, row in df_tois.iterrows():
-                cond = str(row.get('Condition', row.get('Phase', row.get('Name', 'Base'))))
+                cond = str(row.get("Condition", row.get("Phase", row.get("Name", "Base"))))
                 if cond not in cond_map:
                     cond_map[cond] = colors[len(cond_map) % len(colors)]
-                self.tois.append({
-                    's': float(row.get('Start', 0.0)),
-                    'e': float(row.get('End', 0.0)),
-                    'c': cond_map[cond],
-                    'n': str(row.get('Name', 'TOI')),
-                    'p': str(row.get('Phase', '')),
-                    'cond': cond,
-                })
+                self.tois.append(
+                    {
+                        "s": float(row.get("Start", 0.0)),
+                        "e": float(row.get("End", 0.0)),
+                        "c": cond_map[cond],
+                        "n": str(row.get("Name", "TOI")),
+                        "p": str(row.get("Phase", "")),
+                        "cond": cond,
+                    }
+                )
         self.redraw()
 
     def redraw(self):
@@ -806,11 +835,11 @@ class TOITimelineWidget(tk.Canvas):
             return
 
         for t in self.tois:
-            x1 = int(max(0, min(w, (t['s'] / self.duration) * w)))
-            x2 = int(max(0, min(w, (t['e'] / self.duration) * w)))
+            x1 = int(max(0, min(w, (t["s"] / self.duration) * w)))
+            x2 = int(max(0, min(w, (t["e"] / self.duration) * w)))
             if x2 <= x1:
                 x2 = min(w, x1 + 1)
-            self.create_rectangle(x1, 2, x2, h - 2, fill=t['c'], outline="gray")
+            self.create_rectangle(x1, 2, x2, h - 2, fill=t["c"], outline="gray")
 
         self.create_line(self.cursor_x, 0, self.cursor_x, h, fill="#d32f2f", width=2)
 
@@ -828,9 +857,11 @@ class TOITimelineWidget(tk.Canvas):
         sec = perc * self.duration
         self.command_seek(sec)
 
+
 # ═══════════════════════════════════════════════════════════════════
 # VIEW / CONTROLLER — UI only
 # ═══════════════════════════════════════════════════════════════════
+
 
 class RegionView:
     def __init__(self, parent, context):
@@ -916,8 +947,9 @@ class RegionView:
     # ── UI Construction ─────────────────────────────────────────
 
     def _setup_ui(self):
-        tk.Label(self.parent, text="3. Spatial Area of Interest (AOI) Definition",
-                 font=("Segoe UI", 18, "bold"), bg="white").pack(pady=(0, 10), anchor="w")
+        tk.Label(
+            self.parent, text="3. Spatial Area of Interest (AOI) Definition", font=("Segoe UI", 18, "bold"), bg="white"
+        ).pack(pady=(0, 10), anchor="w")
 
         main = tk.PanedWindow(self.parent, orient=tk.HORIZONTAL)
         main.pack(fill=tk.BOTH, expand=True)
@@ -937,9 +969,7 @@ class RegionView:
         self.lbl_player = tk.Label(ctrl, text="Ready", anchor="w")
         self.lbl_player.pack(fill=tk.X, padx=6)
 
-        self.timeline = TOITimelineWidget(
-            ctrl, command_seek=self.seek_to_seconds, height=44, bg="#eeeeee"
-        )
+        self.timeline = TOITimelineWidget(ctrl, command_seek=self.seek_to_seconds, height=44, bg="#eeeeee")
         self.timeline.pack(fill=tk.X, padx=6, pady=(2, 4))
 
         self.lbl_toi = tk.Label(ctrl, text="TOI: n/a", fg="gray", anchor="w")
@@ -950,13 +980,14 @@ class RegionView:
 
         btns = tk.Frame(ctrl)
         btns.pack(pady=5, fill=tk.X)
-        tk.Button(btns, text="1. Video Source",       command=self.browse_video).pack(side=tk.LEFT, padx=5)
-        tk.Button(btns, text="2. Pose Data (.gz)",    command=self.browse_pose).pack(side=tk.LEFT, padx=5)
+        tk.Button(btns, text="1. Video Source", command=self.browse_video).pack(side=tk.LEFT, padx=5)
+        tk.Button(btns, text="2. Pose Data (.gz)", command=self.browse_pose).pack(side=tk.LEFT, padx=5)
         tk.Button(btns, text="3. Identity Map (.json)", command=self.browse_identity).pack(side=tk.LEFT, padx=5)
         tk.Button(btns, text="4. TOI (.tsv/.csv)", command=self.browse_toi).pack(side=tk.LEFT, padx=5)
 
-        tk.Button(btns, text="🔍 FRAME DIAGNOSTICS", bg="red", fg="white",
-                  font=("Bold", 10), command=self.run_diagnostics).pack(side=tk.RIGHT, padx=20)
+        tk.Button(
+            btns, text="🔍 FRAME DIAGNOSTICS", bg="red", fg="white", font=("Bold", 10), command=self.run_diagnostics
+        ).pack(side=tk.RIGHT, padx=20)
 
         transport = tk.Frame(ctrl)
         transport.pack(fill=tk.X, pady=(2, 4))
@@ -985,8 +1016,13 @@ class RegionView:
             self.cb_profile.current(0)
         self.cb_profile.bind("<<ComboboxSelected>>", self.on_profile_change)
 
-        tk.Button(f_prof, text="✨ New (Wizard)", command=self.open_profile_wizard, bg="#e1f5fe").pack(side=tk.LEFT, padx=5)
-        
+        tk.Button(
+            f_prof,
+            text="✨ New (Wizard)",
+            command=self.open_profile_wizard,
+            bg="#e1f5fe",
+        ).pack(side=tk.LEFT, padx=5)
+
         mb_sess = tk.Menubutton(f_prof, text="💾 Session", relief="raised")
         mb_sess.pack(side=tk.LEFT, padx=5)
         m_sess = tk.Menu(mb_sess, tearoff=0)
@@ -1000,23 +1036,24 @@ class RegionView:
         f_mode.pack(fill=tk.X, pady=(6, 2))
         tk.Label(f_mode, text="Parameter Scope:").pack(side=tk.LEFT)
         self.cb_param_scope = ttk.Combobox(
-            f_mode, textvariable=self.param_scope_var, state="readonly",
-            values=["Current TOI", "Whole Video"], width=14
+            f_mode, textvariable=self.param_scope_var, state="readonly", values=["Current TOI", "Whole Video"], width=14
         )
         self.cb_param_scope.pack(side=tk.LEFT, padx=5)
 
         tk.Label(f_mode, text="Manual Scope:").pack(side=tk.LEFT, padx=(10, 0))
         self.cb_edit_scope = ttk.Combobox(
-            f_mode, textvariable=self.edit_scope_var, state="readonly",
-            values=["Current TOI", "Frame", "Whole Video"], width=12
+            f_mode,
+            textvariable=self.edit_scope_var,
+            state="readonly",
+            values=["Current TOI", "Frame", "Whole Video"],
+            width=12,
         )
         self.cb_edit_scope.pack(side=tk.LEFT, padx=5)
 
         f_manual = tk.Frame(right)
         f_manual.pack(fill=tk.X, pady=(2, 6))
         self.btn_manual_mode = tk.Button(
-            f_manual, text="Manual Correction: OFF", bg="#d32f2f", fg="white",
-            command=self.toggle_manual_mode
+            f_manual, text="Manual Correction: OFF", bg="#d32f2f", fg="white", command=self.toggle_manual_mode
         )
         self.btn_manual_mode.pack(side=tk.LEFT, padx=2)
         self.btn_undo = tk.Button(f_manual, text="Undo", width=8, command=self.undo_last_action)
@@ -1029,11 +1066,19 @@ class RegionView:
         lf_conf.pack(fill=tk.X, pady=10)
 
         tk.Label(lf_conf, text="Keypoint Confidence Threshold (0.0 - 1.0):").pack(anchor="w")
-        s_conf = tk.Scale(lf_conf, from_=0.0, to=1.0, resolution=0.05, orient=tk.HORIZONTAL,
-                          variable=self.kp_conf_thresh, command=lambda v: self.show_frame())
+        s_conf = tk.Scale(
+            lf_conf,
+            from_=0.0,
+            to=1.0,
+            resolution=0.05,
+            orient=tk.HORIZONTAL,
+            variable=self.kp_conf_thresh,
+            command=lambda v: self.show_frame(),
+        )
         s_conf.pack(fill=tk.X)
-        tk.Label(lf_conf, text="(Lower to recover missing limbs, Raise to reduce noise)",
-                 fg="gray", font=("Arial", 8)).pack(anchor="w")
+        tk.Label(
+            lf_conf, text="(Lower to recover missing limbs, Raise to reduce noise)", fg="gray", font=("Arial", 8)
+        ).pack(anchor="w")
 
         # Notebook for rule editors
         self.notebook = ttk.Notebook(right)
@@ -1047,9 +1092,15 @@ class RegionView:
         self.refresh_editors()
         self._build_frame_correction_editor(right)
 
-        tk.Button(right, text="GENERATE & EXPORT AOI CSV", bg="#4CAF50", fg="white",
-                  font=("Bold", 12), height=2, command=self.export_data
-                  ).pack(side=tk.BOTTOM, fill=tk.X, pady=20)
+        tk.Button(
+            right,
+            text="GENERATE & EXPORT AOI CSV",
+            bg="#4CAF50",
+            fg="white",
+            font=("Bold", 12),
+            height=2,
+            command=self.export_data,
+        ).pack(side=tk.BOTTOM, fill=tk.X, pady=20)
 
         self._update_history_buttons()
 
@@ -1057,19 +1108,19 @@ class RegionView:
 
     def _setup_hotkeys(self):
         root = self.parent.winfo_toplevel()
-        root.bind("<space>",       self._on_space)
-        root.bind("<Left>",        self._on_left)
-        root.bind("<Right>",       self._on_right)
-        root.bind("<Shift-Left>",  self._on_shift_left)
+        root.bind("<space>", self._on_space)
+        root.bind("<Left>", self._on_left)
+        root.bind("<Right>", self._on_right)
+        root.bind("<Shift-Left>", self._on_shift_left)
         root.bind("<Shift-Right>", self._on_shift_right)
-        root.bind("<Control-z>",   self._on_undo)
-        root.bind("<Control-y>",   self._on_redo)
+        root.bind("<Control-z>", self._on_undo)
+        root.bind("<Control-y>", self._on_redo)
 
     def _is_hotkey_safe(self):
         if not self.parent.winfo_viewable():
             return False
         focused = self.parent.focus_get()
-        if focused and focused.winfo_class() in ['Entry', 'Text', 'Spinbox', 'TEntry']:
+        if focused and focused.winfo_class() in ["Entry", "Text", "Spinbox", "TEntry"]:
             return False
         return True
 
@@ -1151,11 +1202,13 @@ class RegionView:
         after_state = self._snapshot_edit_state()
         if before_state == after_state:
             return
-        self.undo_stack.append({
-            "label": label,
-            "before": before_state,
-            "after": after_state,
-        })
+        self.undo_stack.append(
+            {
+                "label": label,
+                "before": before_state,
+                "after": after_state,
+            }
+        )
         self.redo_stack.clear()
         self._update_history_buttons()
         self._autosave_session_state()
@@ -1185,13 +1238,15 @@ class RegionView:
             "current_profile": self.current_profile,
         }
         for (f_idx, tid, role, aoi), box in self.logic.manual_overrides.items():
-            payload["manual_overrides"].append({
-                "frame": int(f_idx),
-                "track_id": int(tid),
-                "role": str(role),
-                "aoi": str(aoi),
-                "box": [int(v) for v in box],
-            })
+            payload["manual_overrides"].append(
+                {
+                    "frame": int(f_idx),
+                    "track_id": int(tid),
+                    "role": str(role),
+                    "aoi": str(aoi),
+                    "box": [int(v) for v in box],
+                }
+            )
         return payload
 
     def _deserialize_session_state(self, payload):
@@ -1232,7 +1287,7 @@ class RegionView:
         if not path:
             return
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 payload = json.load(f)
             self._deserialize_session_state(payload)
             self.show_frame()
@@ -1254,7 +1309,7 @@ class RegionView:
         if not self.session_state_path or not os.path.exists(self.session_state_path):
             return
         try:
-            with open(self.session_state_path, "r", encoding="utf-8") as f:
+            with open(self.session_state_path, encoding="utf-8") as f:
                 payload = json.load(f)
         except Exception:
             return
@@ -1353,8 +1408,8 @@ class RegionView:
             try:
                 s = float(row.get("Start", -1))
                 e = float(row.get("End", -1))
-            except Exception:
-                continue
+            except Exception:  # noqa: S112
+                continue  # Skip rows with unparseable start/end
             if s <= sec <= e:
                 match = row
                 match_idx = idx  # last match wins
@@ -1406,8 +1461,8 @@ class RegionView:
             for idx_key, changes in idx_map.items():
                 try:
                     ridx = int(idx_key)
-                except Exception:
-                    continue
+                except Exception:  # noqa: S112
+                    continue  # Skip non-integer index keys
                 if 0 <= ridx < len(role_rules):
                     role_rules[ridx].update(changes)
         return prof
@@ -1441,9 +1496,7 @@ class RegionView:
             targets = [self.current_frame]
 
         for f_idx in targets:
-            self.logic.set_manual_override(
-                f_idx, item["track_id"], item["role"], item["aoi"], box
-            )
+            self.logic.set_manual_override(f_idx, item["track_id"], item["role"], item["aoi"], box)
 
     # ── Profile Wizard ──────────────────────────────────────────
 
@@ -1454,8 +1507,8 @@ class RegionView:
 
         v_name = tk.StringVar(value="New_Strategy_Profile")
 
-        self.strat_vars = {}
-        rule_rows = []
+        self.strat_vars: dict[str, tk.IntVar] = {}
+        rule_rows: list[dict] = []
 
         # --- Section 1: Name ---
         tk.Label(win, text="1. Profile Name", font=("Bold", 12)).pack(pady=(10, 5))
@@ -1471,7 +1524,7 @@ class RegionView:
             path = filedialog.askopenfilename(filetypes=[("Identity JSON", "*.json")])
             if path:
                 try:
-                    with open(path, 'r') as f:
+                    with open(path) as f:
                         data = json.load(f)
                         roles = set(data.values())
                         refresh_roles_ui(roles)
@@ -1479,7 +1532,11 @@ class RegionView:
                 except Exception as e:
                     messagebox.showerror("Error", str(e))
 
-        tk.Button(win, text="📂 Load Identity JSON (Refresh List)", command=load_identity_wiz).pack(fill=tk.X, padx=20, pady=5)
+        tk.Button(
+            win,
+            text="📂 Load Identity JSON (Refresh List)",
+            command=load_identity_wiz,
+        ).pack(fill=tk.X, padx=20, pady=5)
 
         lf_strat = tk.LabelFrame(win, text="Visualization Mode", padx=10, pady=10)
         lf_strat.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
@@ -1505,7 +1562,7 @@ class RegionView:
                 roles_set = {"Target"}
             roles_set.add("DEFAULT")
 
-            tk.Label(frame_roles, text="Role",     font=("Bold", 9)).grid(row=0, column=0, sticky="w", padx=5)
+            tk.Label(frame_roles, text="Role", font=("Bold", 9)).grid(row=0, column=0, sticky="w", padx=5)
             tk.Label(frame_roles, text="Strategy", font=("Bold", 9)).grid(row=0, column=1, sticky="w", padx=5)
 
             r_idx = 1
@@ -1516,8 +1573,8 @@ class RegionView:
                 self.strat_vars[role] = v
                 fr = tk.Frame(frame_roles)
                 fr.grid(row=r_idx, column=1, sticky="w", padx=5)
-                tk.Radiobutton(fr, text="AOI",  variable=v, value=1).pack(side=tk.LEFT)
-                tk.Radiobutton(fr, text="Box",  variable=v, value=2).pack(side=tk.LEFT)
+                tk.Radiobutton(fr, text="AOI", variable=v, value=1).pack(side=tk.LEFT)
+                tk.Radiobutton(fr, text="Box", variable=v, value=2).pack(side=tk.LEFT)
                 tk.Radiobutton(fr, text="Hide", variable=v, value=0).pack(side=tk.LEFT)
                 r_idx += 1
 
@@ -1553,7 +1610,7 @@ class RegionView:
 
         def add_rule(seed=None):
             seed = seed or {}
-            row = {}
+            row: dict[str, Any] = {}
 
             lf = tk.LabelFrame(rules_frame, text=f"AOI Rule #{len(rule_rows) + 1}", padx=8, pady=8)
             lf.pack(fill=tk.X, pady=5)
@@ -1572,8 +1629,7 @@ class RegionView:
             tk.Entry(top, textvariable=v_rname, width=22).pack(side=tk.LEFT, padx=5)
             tk.Label(top, text="Shape:").pack(side=tk.LEFT, padx=(10, 0))
             cb_shape = ttk.Combobox(
-                top, values=["box", "polygon", "circle", "oval"],
-                textvariable=v_shape, state="readonly", width=10
+                top, values=["box", "polygon", "circle", "oval"], textvariable=v_shape, state="readonly", width=10
             )
             cb_shape.pack(side=tk.LEFT, padx=5)
             cb_shape.set(v_shape.get())
@@ -1583,9 +1639,23 @@ class RegionView:
             tk.Label(params, text="Margin(px):").pack(side=tk.LEFT)
             tk.Spinbox(params, from_=-200, to=1000, width=8, textvariable=v_margin).pack(side=tk.LEFT, padx=4)
             tk.Label(params, text="Scale W:").pack(side=tk.LEFT)
-            tk.Spinbox(params, from_=0.1, to=8.0, increment=0.1, width=6, textvariable=v_scale_w).pack(side=tk.LEFT, padx=4)
+            tk.Spinbox(
+                params,
+                from_=0.1,
+                to=8.0,
+                increment=0.1,
+                width=6,
+                textvariable=v_scale_w,
+            ).pack(side=tk.LEFT, padx=4)
             tk.Label(params, text="Scale H:").pack(side=tk.LEFT)
-            tk.Spinbox(params, from_=0.1, to=8.0, increment=0.1, width=6, textvariable=v_scale_h).pack(side=tk.LEFT, padx=4)
+            tk.Spinbox(
+                params,
+                from_=0.1,
+                to=8.0,
+                increment=0.1,
+                width=6,
+                textvariable=v_scale_h,
+            ).pack(side=tk.LEFT, padx=4)
             tk.Label(params, text="Bottom Off:").pack(side=tk.LEFT)
             tk.Spinbox(params, from_=-500, to=1000, width=8, textvariable=v_offset).pack(side=tk.LEFT, padx=4)
 
@@ -1602,8 +1672,9 @@ class RegionView:
                 if 0 <= int(kp_idx) < lb.size():
                     lb.selection_set(int(kp_idx))
 
-            tk.Button(lf, text="Remove Rule", fg="#c62828",
-                      command=lambda r=row: remove_rule(r)).pack(anchor="e", pady=(4, 0))
+            tk.Button(lf, text="Remove Rule", fg="#c62828", command=lambda r=row: remove_rule(r)).pack(
+                anchor="e", pady=(4, 0)
+            )
 
             row["name"] = v_rname
             row["shape"] = v_shape
@@ -1657,21 +1728,18 @@ class RegionView:
 
         buttons_rules = tk.Frame(win)
         buttons_rules.pack(fill=tk.X, padx=20, pady=(2, 6))
-        tk.Button(
-            buttons_rules,
-            text="+ Add AOI Rule",
-            bg="#e3f2fd",
-            command=lambda: add_rule()
-        ).pack(side=tk.LEFT)
+        tk.Button(buttons_rules, text="+ Add AOI Rule", bg="#e3f2fd", command=lambda: add_rule()).pack(side=tk.LEFT)
 
-        add_rule({
-            "name": "FullBody",
-            "shape": "box",
-            "kps": list(range(17)),
-            "margin_px": 20,
-            "scale_w": 1.0,
-            "scale_h": 1.0,
-        })
+        add_rule(
+            {
+                "name": "FullBody",
+                "shape": "box",
+                "kps": list(range(17)),
+                "margin_px": 20,
+                "scale_w": 1.0,
+                "scale_h": 1.0,
+            }
+        )
 
         # --- Save ---
         def save_wiz():
@@ -1688,21 +1756,22 @@ class RegionView:
                 if strategy_code == 1:
                     return clone_rules(custom_rules)
                 elif strategy_code == 2:
-                    return [{
-                        "name": "FullBody",
-                        "shape": "box",
-                        "kps": list(range(17)),
-                        "margin_px": 20,
-                        "expand_factor": 1.0,
-                    }]
+                    return [
+                        {
+                            "name": "FullBody",
+                            "shape": "box",
+                            "kps": list(range(17)),
+                            "margin_px": 20,
+                            "expand_factor": 1.0,
+                        }
+                    ]
                 else:
                     return []
 
             has_aoi_roles = any(v.get() == 1 for v in self.strat_vars.values())
             if has_aoi_roles and not custom_rules:
                 messagebox.showwarning(
-                    "Missing Rules",
-                    "At least one custom AOI rule is required when a role is set to AOI mode."
+                    "Missing Rules", "At least one custom AOI rule is required when a role is set to AOI mode."
                 )
                 return
 
@@ -1715,12 +1784,13 @@ class RegionView:
             messagebox.showinfo("Success", f"Profile '{name}' saved!")
             win.destroy()
 
-            self.cb_profile['values'] = self.pm.list_profiles()
+            self.cb_profile["values"] = self.pm.list_profiles()
             self.cb_profile.set(name)
             self.on_profile_change(None)
 
-        tk.Button(win, text="💾 GENERATE PROFILE", bg="#4CAF50", fg="white",
-                  font=("Bold", 12), command=save_wiz).pack(side=tk.BOTTOM, fill=tk.X, pady=20)
+        tk.Button(win, text="💾 GENERATE PROFILE", bg="#4CAF50", fg="white", font=("Bold", 12), command=save_wiz).pack(
+            side=tk.BOTTOM, fill=tk.X, pady=20
+        )
 
     # ── Rule Editors ────────────────────────────────────────────
 
@@ -1761,9 +1831,7 @@ class RegionView:
         ).grid(row=0, column=0, columnspan=4, sticky="w")
 
         tk.Label(lf, text="AOI in current frame:").grid(row=1, column=0, sticky="w", columnspan=4)
-        self.cb_frame_aoi = ttk.Combobox(
-            lf, textvariable=self.selected_frame_aoi, state="readonly"
-        )
+        self.cb_frame_aoi = ttk.Combobox(lf, textvariable=self.selected_frame_aoi, state="readonly")
         self.cb_frame_aoi.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(2, 6))
         self.cb_frame_aoi.bind("<<ComboboxSelected>>", self.on_frame_aoi_select)
 
@@ -1778,9 +1846,22 @@ class RegionView:
         f_opts = tk.Frame(lf)
         f_opts.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(0, 6))
         tk.Label(f_opts, text="Ghost Win:").pack(side=tk.LEFT)
-        tk.Spinbox(f_opts, from_=1, to=300, textvariable=self.ghost_window_var, width=4, command=self.show_frame).pack(side=tk.LEFT, padx=2)
+        tk.Spinbox(
+            f_opts,
+            from_=1,
+            to=300,
+            textvariable=self.ghost_window_var,
+            width=4,
+            command=self.show_frame,
+        ).pack(side=tk.LEFT, padx=2)
         tk.Label(f_opts, text="Seed:").pack(side=tk.LEFT, padx=(10, 0))
-        ttk.Combobox(f_opts, textvariable=self.force_add_mode_var, values=["Auto", "Ghost Only", "Center Only"], state="readonly", width=10).pack(side=tk.LEFT, padx=2)
+        ttk.Combobox(
+            f_opts,
+            textvariable=self.force_add_mode_var,
+            values=["Auto", "Ghost Only", "Center Only"],
+            state="readonly",
+            width=10,
+        ).pack(side=tk.LEFT, padx=2)
 
         tk.Label(lf, text="x1").grid(row=5, column=0, sticky="w")
         tk.Entry(lf, textvariable=self.edit_x1, width=8).grid(row=5, column=1, sticky="w")
@@ -1794,10 +1875,12 @@ class RegionView:
 
         btn_row = tk.Frame(lf)
         btn_row.grid(row=7, column=0, columnspan=4, sticky="ew", pady=(8, 0))
-        tk.Button(btn_row, text="Apply to Frame", bg="#1976d2", fg="white",
-                  command=self.apply_selected_override).pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_row, text="Linear Interp", bg="#455a64", fg="white",
-                  command=self.interpolate_selected_linear).pack(side=tk.LEFT, padx=2)
+        tk.Button(btn_row, text="Apply to Frame", bg="#1976d2", fg="white", command=self.apply_selected_override).pack(
+            side=tk.LEFT, padx=2
+        )
+        tk.Button(
+            btn_row, text="Linear Interp", bg="#455a64", fg="white", command=self.interpolate_selected_linear
+        ).pack(side=tk.LEFT, padx=2)
         tk.Button(btn_row, text="Clear Selected", command=self.clear_selected_override).pack(side=tk.LEFT, padx=2)
         tk.Button(btn_row, text="Clear Frame", command=self.clear_frame_overrides).pack(side=tk.LEFT, padx=2)
 
@@ -1811,31 +1894,31 @@ class RegionView:
         self.force_add_lookup = {}
         values = []
         prof = self._effective_profile_for_frame(self.current_frame)
-        
-        if prof and 'roles' in prof and self.logic.identity_map:
+
+        if prof and "roles" in prof and self.logic.identity_map:
             sorted_ids = sorted(self.logic.identity_map.items(), key=lambda x: int(x[0]))
             for tid_str, role in sorted_ids:
                 if role in self.logic.IGNORED_ROLES:
                     continue
                 rules = self.logic._get_rules(prof, role)
                 for rule in rules:
-                    aoi_name = rule['name']
+                    aoi_name = rule["name"]
                     label = f"ID {tid_str} | {role} | {aoi_name}"
                     values.append(label)
                     self.force_add_lookup[label] = {
                         "track_id": int(tid_str),
                         "role": role,
                         "aoi": aoi_name,
-                        "shape_type": rule.get('shape', 'box')
+                        "shape_type": rule.get("shape", "box"),
                     }
-                    
-        self.cb_force_add['values'] = values
+
+        self.cb_force_add["values"] = values
         if values:
             self.cb_force_add.current(0)
 
     def _selected_force_add_data(self):
         sel = self.cb_force_add.get()
-        if not sel or not hasattr(self, 'force_add_lookup') or sel not in self.force_add_lookup:
+        if not sel or not hasattr(self, "force_add_lookup") or sel not in self.force_add_lookup:
             return None
         data = dict(self.force_add_lookup[sel])
         data["shape_type"] = str(data.get("shape_type", "box")).lower()
@@ -1879,9 +1962,7 @@ class RegionView:
 
         prof = self._effective_profile_for_frame(self.current_frame)
         window = self.ghost_window_var.get()
-        ghosts = self.logic.find_ghost_tracks(
-            self.current_frame, window, prof, self.kp_conf_thresh.get()
-        )
+        ghosts = self.logic.find_ghost_tracks(self.current_frame, window, prof, self.kp_conf_thresh.get())
         hit = self._find_item_by_identity(ghosts, track_id, role, aoi)
         if hit:
             return self.logic._sanitize_box(hit["box"]), hit.get("source_frame")
@@ -1897,17 +1978,15 @@ class RegionView:
         source_frame = None
 
         if mode in ("Auto", "Ghost Only"):
-            box, source_frame = self._find_ghost_seed_for_identity(
-                data["track_id"], data["role"], data["aoi"]
-            )
+            box, source_frame = self._find_ghost_seed_for_identity(data["track_id"], data["role"], data["aoi"])
 
         if box is None:
             if mode == "Ghost Only":
                 messagebox.showinfo("Force Add", "No ghost track found in range (Ghost Only mode).")
                 return
             w, h = 100, 100
-            cx = self._orig_w // 2 if hasattr(self, '_orig_w') and self._orig_w > 0 else 320
-            cy = self._orig_h // 2 if hasattr(self, '_orig_h') and self._orig_h > 0 else 240
+            cx = self._orig_w // 2 if hasattr(self, "_orig_w") and self._orig_w > 0 else 320
+            cy = self._orig_h // 2 if hasattr(self, "_orig_h") and self._orig_h > 0 else 240
             box = (cx - w // 2, cy - h // 2, cx + w // 2, cy + h // 2)
             action_label = f"Force add {data['role']}:{data['aoi']} (center seed)"
         else:
@@ -1921,10 +2000,7 @@ class RegionView:
         self._select_item_by_identity(data["track_id"], data["role"], data["aoi"], box_hint=box)
         if source_frame is not None:
             self.lbl_player.config(
-                text=(
-                    f"Force Add seeded from Ghost at frame {int(source_frame)} "
-                    f"for {data['role']}:{data['aoi']}."
-                )
+                text=(f"Force Add seeded from Ghost at frame {int(source_frame)} " f"for {data['role']}:{data['aoi']}.")
             )
 
     def force_add_draw_on_video(self):
@@ -1942,9 +2018,9 @@ class RegionView:
 
         if self.pending_force_add:
             same_item = (
-                int(self.pending_force_add.get("track_id", -1)) == int(data["track_id"]) and
-                str(self.pending_force_add.get("role", "")) == str(data["role"]) and
-                str(self.pending_force_add.get("aoi", "")) == str(data["aoi"])
+                int(self.pending_force_add.get("track_id", -1)) == int(data["track_id"])
+                and str(self.pending_force_add.get("role", "")) == str(data["role"])
+                and str(self.pending_force_add.get("aoi", "")) == str(data["aoi"])
             )
             if same_item:
                 self.pending_force_add = None
@@ -1955,10 +2031,7 @@ class RegionView:
         self.pending_force_add = data
         self.drag_state = None
         if data["shape_type"] == "circle":
-            hint = (
-                f"Draw armed for {data['role']}:{data['aoi']} [circle]: "
-                "click+drag from CENTER to set radius."
-            )
+            hint = f"Draw armed for {data['role']}:{data['aoi']} [circle]: " "click+drag from CENTER to set radius."
         else:
             hint = (
                 f"Draw armed for {data['role']}:{data['aoi']} [{data['shape_type']}]: "
@@ -2020,9 +2093,7 @@ class RegionView:
         for i in range(len(points)):
             xi, yi = points[i]
             xj, yj = points[j]
-            intersects = ((yi > py) != (yj > py)) and (
-                px < (xj - xi) * (py - yi) / max(1e-6, (yj - yi)) + xi
-            )
+            intersects = ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / max(1e-6, (yj - yi)) + xi)
             if intersects:
                 inside = not inside
             j = i
@@ -2033,8 +2104,9 @@ class RegionView:
         if shape_type == "circle":
             cx = item.get("cx", int((item["box"][0] + item["box"][2]) / 2))
             cy = item.get("cy", int((item["box"][1] + item["box"][3]) / 2))
-            r = max(1, item.get("radius", int(min(item["box"][2] - item["box"][0],
-                                                   item["box"][3] - item["box"][1]) / 2)))
+            r = max(
+                1, item.get("radius", int(min(item["box"][2] - item["box"][0], item["box"][3] - item["box"][1]) / 2))
+            )
             dx = px - cx
             dy = py - cy
             return (dx * dx + dy * dy) <= (r * r)
@@ -2183,9 +2255,7 @@ class RegionView:
 
         with self.logic.lock:
             pose_frames = {
-                int(f_idx)
-                for f_idx in self.logic.pose_data.keys()
-                if int(start_frame) <= int(f_idx) <= int(end_frame)
+                int(f_idx) for f_idx in self.logic.pose_data.keys() if int(start_frame) <= int(f_idx) <= int(end_frame)
             }
             manual_frames = {
                 int(k[0])
@@ -2209,8 +2279,7 @@ class RegionView:
     @staticmethod
     def _lerp_box(box_a, box_b, t):
         return tuple(
-            int(round(float(a) + (float(b) - float(a)) * float(t)))
-            for a, b in zip(box_a, box_b)
+            int(round(float(a) + (float(b) - float(a)) * float(t))) for a, b in zip(box_a, box_b, strict=False)
         )
 
     def interpolate_selected_linear(self):
@@ -2230,9 +2299,7 @@ class RegionView:
             messagebox.showwarning("Interpolation", "No valid frame range for interpolation.")
             return
 
-        known_boxes = self._collect_known_boxes_for_identity(
-            track_id, role, aoi, start_frame, end_frame
-        )
+        known_boxes = self._collect_known_boxes_for_identity(track_id, role, aoi, start_frame, end_frame)
         anchor_frames = sorted(known_boxes.keys())
         if len(anchor_frames) < 2:
             messagebox.showinfo(
@@ -2351,7 +2418,7 @@ class RegionView:
             window = self.ghost_window_var.get()
             prof = self._effective_profile_for_frame(self.current_frame)
             ghosts = self.logic.find_ghost_tracks(self.current_frame, window, prof, self.kp_conf_thresh.get())
-            
+
             for g in ghosts:
                 key = self._aoi_key(g) + " [GHOST]"
                 self.frame_aoi_lookup[key] = g
@@ -2394,8 +2461,10 @@ class RegionView:
             s_margin = tk.Scale(lf, from_=0, to=100, orient=tk.HORIZONTAL)
             s_margin.set(rule.get("margin_px", 0))
             s_margin.grid(row=0, column=1, sticky="ew")
-            s_margin.bind("<ButtonRelease-1>",
-                          lambda e, r=role_key, i=idx, s=s_margin: self.update_rule_val(r, i, "margin_px", s.get()))
+            s_margin.bind(
+                "<ButtonRelease-1>",
+                lambda e, r=role_key, i=idx, s=s_margin: self.update_rule_val(r, i, "margin_px", s.get()),
+            )
 
             # Width Scale
             cur_w = rule.get("scale_w", rule.get("expand_factor", 1.0))
@@ -2403,8 +2472,9 @@ class RegionView:
             s_w = tk.Scale(lf, from_=0.5, to=4.0, resolution=0.1, orient=tk.HORIZONTAL, fg="#d32f2f")
             s_w.set(cur_w)
             s_w.grid(row=1, column=1, sticky="ew")
-            s_w.bind("<ButtonRelease-1>",
-                     lambda e, r=role_key, i=idx, s=s_w: self.update_rule_val(r, i, "scale_w", s.get()))
+            s_w.bind(
+                "<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_w: self.update_rule_val(r, i, "scale_w", s.get())
+            )
 
             # Height Scale
             cur_h = rule.get("scale_h", rule.get("expand_factor", 1.0))
@@ -2412,8 +2482,9 @@ class RegionView:
             s_h = tk.Scale(lf, from_=0.5, to=4.0, resolution=0.1, orient=tk.HORIZONTAL, fg="#1976d2")
             s_h.set(cur_h)
             s_h.grid(row=2, column=1, sticky="ew")
-            s_h.bind("<ButtonRelease-1>",
-                     lambda e, r=role_key, i=idx, s=s_h: self.update_rule_val(r, i, "scale_h", s.get()))
+            s_h.bind(
+                "<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_h: self.update_rule_val(r, i, "scale_h", s.get())
+            )
 
             # Bottom offset (only if present)
             if "offset_y_bottom" in rule:
@@ -2421,8 +2492,10 @@ class RegionView:
                 s_off = tk.Scale(lf, from_=0, to=100, orient=tk.HORIZONTAL, fg="gray")
                 s_off.set(rule.get("offset_y_bottom", 0))
                 s_off.grid(row=3, column=1, sticky="ew")
-                s_off.bind("<ButtonRelease-1>",
-                           lambda e, r=role_key, i=idx, s=s_off: self.update_rule_val(r, i, "offset_y_bottom", s.get()))
+                s_off.bind(
+                    "<ButtonRelease-1>",
+                    lambda e, r=role_key, i=idx, s=s_off: self.update_rule_val(r, i, "offset_y_bottom", s.get()),
+                )
 
     def update_rule_val(self, role, idx, key, val):
         before = self._snapshot_edit_state()
@@ -2463,9 +2536,7 @@ class RegionView:
 
     def run_diagnostics(self):
         prof = self._effective_profile_for_frame(self.current_frame)
-        report = self.logic.get_diagnostics_report(
-            self.current_frame, prof, self.kp_conf_thresh.get()
-        )
+        report = self.logic.get_diagnostics_report(self.current_frame, prof, self.kp_conf_thresh.get())
         print("\n" + report + "\n")
 
     # ── Data Loading (thin wrappers) ────────────────────────────
@@ -2501,16 +2572,14 @@ class RegionView:
 
         def _worker():
             try:
-                count = self.logic.load_pose_data(
-                    path, progress_callback=lambda m: print(m)
-                )
+                count = self.logic.load_pose_data(path, progress_callback=lambda m: print(m))
                 self.parent.after(0, lambda: self._on_pose_loaded(count))
             except Exception as exc:
                 import traceback
+
                 traceback.print_exc()
                 err_msg = f"Error loading poses: {exc}"
-                self.parent.after(0, lambda: messagebox.showerror(
-                    "Error", err_msg))
+                self.parent.after(0, lambda: messagebox.showerror("Error", err_msg))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -2569,9 +2638,7 @@ class RegionView:
             }
             self._apply_manual_box_with_scope(data, start_box)
             self.show_frame()
-            self._select_item_by_identity(
-                data["track_id"], data["role"], data["aoi"], box_hint=start_box
-            )
+            self._select_item_by_identity(data["track_id"], data["role"], data["aoi"], box_hint=start_box)
             return
 
         if not self.frame_aoi_items:
@@ -2702,9 +2769,7 @@ class RegionView:
 
         # Delegate all geometry to Logic
         prof = self._effective_profile_for_frame(self.current_frame)
-        items = self.logic.get_render_data(
-            self.current_frame, prof, self.kp_conf_thresh.get()
-        )
+        items = self.logic.get_render_data(self.current_frame, prof, self.kp_conf_thresh.get())
         for item in items:
             x1, y1, x2, y2 = item["box"]
             c = item["color"]
@@ -2712,8 +2777,7 @@ class RegionView:
             suffix = "*" if item.get("corrected") else ""
             shape_suffix = f"[{item.get('shape_type', 'box')}]"
             label = f"{item['label']}#{item['track_id']}{shape_suffix}{suffix}"
-            cv2.putText(frame, label, (x1, y1 - 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, c, 1)
+            cv2.putText(frame, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, c, 1)
 
         selected_key = self.selected_frame_aoi.get()
         selected_item = None
@@ -2745,7 +2809,12 @@ class RegionView:
 
         sec = self.current_frame / max(1e-6, self.fps) if self.fps > 0 else 0.0
         self.lbl_player.config(
-            text=f"Frame {self.current_frame}/{max(0, self.total_frames - 1)} | {sec:.3f}s | FPS {self.fps:.2f} | Manual {'ON' if self.manual_mode else 'OFF'}"
+            text=(
+                f"Frame {self.current_frame}/"
+                f"{max(0, self.total_frames - 1)} | "
+                f"{sec:.3f}s | FPS {self.fps:.2f} | "
+                f"Manual {'ON' if self.manual_mode else 'OFF'}"
+            )
         )
 
     # ── Playback ────────────────────────────────────────────────
@@ -2790,7 +2859,9 @@ class RegionView:
         def _worker():
             try:
                 count = self.logic.export_csv(
-                    out, self.current_profile, self.kp_conf_thresh.get(),
+                    out,
+                    self.current_profile,
+                    self.kp_conf_thresh.get(),
                     progress_callback=lambda m: print(m),
                     profile_for_frame_fn=lambda f_idx, _p: self._effective_profile_for_frame(f_idx),
                 )

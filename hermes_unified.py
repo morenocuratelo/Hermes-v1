@@ -1,8 +1,8 @@
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog, simpledialog
+import multiprocessing
 import os
 import sys
-import multiprocessing
+import tkinter as tk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 # Tentativo di importare un tema moderno (opzionale)
 try:
@@ -17,6 +17,7 @@ from hermes_context import AppContext
 # LAZY IMPORTS (Per evitare crash se un sottomodulo ha errori)
 # ════════════════════════════════════════════════════════════════
 
+
 def get_module_class(module_name, class_name):
     """Importa dinamicamente una classe da un modulo."""
     try:
@@ -29,33 +30,35 @@ def get_module_class(module_name, class_name):
     except Exception as e:
         return f"Error loading module: {e}"
 
+
 # Mappa dei moduli (Nome visualizzato -> (File, Classe))
 MODULES_MAP = {
     "1. HUMAN (Kinematic Extraction)": ("hermes_human", "YoloView"),
-    "2. MASTER TOI (Cut & Sync)":      ("hermes_master_toi", "MasterToiView"),
-    "3. ENTITY (ID Assignment)":       ("hermes_entity", "IdentityView"),
-    "4. REGION (AOI Definition)":      ("hermes_region", "RegionView"),
-    "5. EYE MAPPING":                  ("hermes_eye", "GazeView"),
-    "6. GAZE FILTERS (I-VT)":          ("hermes_filters", "FilterView"),
-    "7. ANALYTICS & REPORTING":        ("hermes_stats", "GazeStatsView"),
-    "8. DATA REVIEWER":                ("hermes_reviewer", "ReviewerView")
+    "2. MASTER TOI (Cut & Sync)": ("hermes_master_toi", "MasterToiView"),
+    "3. ENTITY (ID Assignment)": ("hermes_entity", "IdentityView"),
+    "4. REGION (AOI Definition)": ("hermes_region", "RegionView"),
+    "5. EYE MAPPING": ("hermes_eye", "GazeView"),
+    "6. GAZE FILTERS (I-VT)": ("hermes_filters", "FilterView"),
+    "7. ANALYTICS & REPORTING": ("hermes_stats", "GazeStatsView"),
+    "8. DATA REVIEWER": ("hermes_reviewer", "ReviewerView"),
 }
 
 # ════════════════════════════════════════════════════════════════
 # PROJECT WIZARD (Creazione/Apertura Progetto)
 # ════════════════════════════════════════════════════════════════
 
+
 class ProjectWizard:
     def __init__(self, root, context, on_complete):
         self.root = root
         self.context = context
         self.on_complete = on_complete
-        
+
         self.win = tk.Toplevel(root)
         self.win.title("HERMES - Project Setup")
         self.win.geometry("600x450")
-        self.win.protocol("WM_DELETE_WINDOW", sys.exit) # Chiude tutto se si esce qui
-        
+        self.win.protocol("WM_DELETE_WINDOW", sys.exit)  # Chiude tutto se si esce qui
+
         # Center window
         self.win.update_idletasks()
         w, h = self.win.winfo_width(), self.win.winfo_height()
@@ -64,35 +67,38 @@ class ProjectWizard:
         self.win.geometry(f"+{x}+{y}")
 
         ttk.Label(self.win, text="Welcome to HERMES", font=("Segoe UI", 24, "bold")).pack(pady=(40, 10))
-        ttk.Label(self.win, text="Scientific Eye-Tracking & Motion Analysis Suite", font=("Segoe UI", 12)).pack(pady=(0, 40))
-        
+        ttk.Label(self.win, text="Scientific Eye-Tracking & Motion Analysis Suite", font=("Segoe UI", 12)).pack(
+            pady=(0, 40)
+        )
+
         f_btns = ttk.Frame(self.win)
         f_btns.pack(fill=tk.X, padx=50)
-        
+
         ttk.Button(f_btns, text="✨ Create New Project", command=self.create_project).pack(fill=tk.X, pady=5, ipady=10)
         ttk.Button(f_btns, text="📂 Open Existing Project", command=self.open_project).pack(fill=tk.X, pady=5, ipady=10)
-        
+
         # Recent Projects (se esistono)
         if self.context.last_project and os.path.exists(self.context.last_project):
             name = os.path.basename(self.context.last_project)
             ttk.Label(self.win, text="Recent:", foreground="gray").pack(pady=(30, 5))
-            ttk.Button(self.win, text=f"Resume: {name}", 
-                      command=lambda: self.load_and_start(self.context.last_project)).pack(fill=tk.X, padx=100)
+            ttk.Button(
+                self.win, text=f"Resume: {name}", command=lambda: self.load_and_start(self.context.last_project)
+            ).pack(fill=tk.X, padx=100)
 
     def create_project(self):
         parent_dir = filedialog.askdirectory(title="Select Parent Folder")
         if not parent_dir:
             return
-        
+
         name = simpledialog.askstring("New Project", "Project Name:")
         if not name:
             return
-        
+
         try:
             self.context.create_project(parent_dir, name)
             # Aggiunge subito un partecipante di default
             if messagebox.askyesno("Setup", "Create first participant now?"):
-                self.win.withdraw() # Nasconde la finestra progetto mentre si usa il wizard partecipante
+                self.win.withdraw()  # Nasconde la finestra progetto mentre si usa il wizard partecipante
                 ParticipantWizard(self.root, self.context, self._on_participant_created)
             else:
                 self.win.destroy()
@@ -118,9 +124,11 @@ class ProjectWizard:
         except Exception as e:
             messagebox.showerror("Load Error", str(e))
 
+
 # ════════════════════════════════════════════════════════════════
 # PARTICIPANT WIZARD (Standardizzazione e Import)
 # ════════════════════════════════════════════════════════════════
+
 
 class ParticipantWizard:
     def __init__(self, parent, context, on_complete):
@@ -162,11 +170,13 @@ class ParticipantWizard:
         self._add_field(grid, 4, "Initials:", self.var_init)
 
         ttk.Separator(lf_id, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
-        
+
         f_prev = ttk.Frame(lf_id)
         f_prev.pack(fill=tk.X)
         ttk.Label(f_prev, text="Generated ID: ", font=("Segoe UI", 10)).pack(side=tk.LEFT)
-        ttk.Label(f_prev, textvariable=self.var_preview, font=("Consolas", 12, "bold"), foreground="blue").pack(side=tk.LEFT)
+        ttk.Label(f_prev, textvariable=self.var_preview, font=("Consolas", 12, "bold"), foreground="blue").pack(
+            side=tk.LEFT
+        )
 
         # 2. File Import
         lf_files = ttk.LabelFrame(self.win, text="2. Import Input Files (Optional)", padding=10)
@@ -203,7 +213,11 @@ class ParticipantWizard:
             var.set(f)
 
     def _update_preview(self):
-        pid = f"{self.var_exp.get()}_{self.var_group.get()}_{self.var_cond.get()}_{self.var_num.get()}_{self.var_init.get()}"
+        pid = (
+            f"{self.var_exp.get()}_{self.var_group.get()}"
+            f"_{self.var_cond.get()}_{self.var_num.get()}"
+            f"_{self.var_init.get()}"
+        )
         self.var_preview.set(pid)
 
     def create_participant(self):
@@ -222,10 +236,10 @@ class ParticipantWizard:
         if self.path_video.get():
             ext = os.path.splitext(self.path_video.get())[1]
             self.context.import_file_for_participant(pid, self.path_video.get(), f"{pid}_video{ext}")
-        
+
         if self.path_gaze.get():
             self.context.import_file_for_participant(pid, self.path_gaze.get(), f"{pid}_gaze.gz")
-            
+
         if self.path_events.get():
             self.context.import_file_for_participant(pid, self.path_events.get(), f"{pid}_events.json")
 
@@ -236,22 +250,24 @@ class ParticipantWizard:
         self.win.destroy()
         self.on_complete(pid)
 
+
 # ════════════════════════════════════════════════════════════════
 # MAIN APP (Unified Interface)
 # ════════════════════════════════════════════════════════════════
 
+
 class HermesUnifiedApp:
     def __init__(self, root):
         self.root = root
-        self.root.withdraw() # Hide root during wizard
-        
+        self.root.withdraw()  # Hide root during wizard
+
         # Apply Theme
         if sv_ttk:
-            sv_ttk.set_theme("light") # O "dark"
-        
+            sv_ttk.set_theme("light")  # O "dark"
+
         self.context = AppContext()
         self.current_view = None
-        
+
         # Launch Wizard
         ProjectWizard(self.root, self.context, self.launch_main_ui)
 
@@ -259,7 +275,7 @@ class HermesUnifiedApp:
         self.root.deiconify()
         self.root.geometry("1400x900")
         self.update_title()
-        
+
         self._setup_layout()
         self._refresh_sidebar()
 
@@ -271,15 +287,15 @@ class HermesUnifiedApp:
         # 1. Sidebar (Left)
         self.sidebar = ttk.Frame(self.root, width=260)
         self.sidebar.pack(side=tk.LEFT, fill=tk.Y)
-        self.sidebar.pack_propagate(False) # Fixed width
-        
+        self.sidebar.pack_propagate(False)  # Fixed width
+
         # Separator
         ttk.Separator(self.root, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y)
-        
+
         # 2. Content (Right)
         self.content_area = ttk.Frame(self.root)
         self.content_area.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-        
+
         # Welcome Screen
         self._show_welcome()
 
@@ -287,36 +303,40 @@ class HermesUnifiedApp:
         # Clear sidebar
         for w in self.sidebar.winfo_children():
             w.destroy()
-        
+
         # A. Header
         f_head = ttk.Frame(self.sidebar, padding=15)
         f_head.pack(fill=tk.X)
         ttk.Label(f_head, text="HERMES", font=("Trajan Pro", 24, "bold")).pack(anchor="w")
         ttk.Label(f_head, text="Research Suite", font=("Segoe UI", 10), foreground="gray").pack(anchor="w")
-        
+
         # B. Participant Selector
         lf_part = ttk.LabelFrame(self.sidebar, text="Active Participant", padding=10)
         lf_part.pack(fill=tk.X, padx=10, pady=10)
-        
+
         self.cb_part = ttk.Combobox(lf_part, values=self.context.participants, state="readonly")
         self.cb_part.pack(fill=tk.X, pady=(0, 5))
         self.cb_part.bind("<<ComboboxSelected>>", self._on_participant_change)
-        
+
         # Set active if exists
         if self.context.current_participant:
             self.cb_part.set(self.context.current_participant)
         elif self.context.participants:
             self.cb_part.current(0)
             self._on_participant_change(None)
-            
+
         f_p_btns = ttk.Frame(lf_part)
         f_p_btns.pack(fill=tk.X)
         ttk.Button(f_p_btns, text="➕ New", width=6, command=self._add_participant).pack(side=tk.LEFT)
-        ttk.Button(f_p_btns, text="📂 Input Folder", command=self._open_input_folder).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5,0))
+        ttk.Button(f_p_btns, text="📂 Input Folder", command=self._open_input_folder).pack(
+            side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0)
+        )
 
         # C. Modules Navigation
-        ttk.Label(self.sidebar, text="WORKFLOW MODULES", font=("Segoe UI", 9, "bold"), foreground="#555").pack(anchor="w", padx=15, pady=(20, 5))
-        
+        ttk.Label(self.sidebar, text="WORKFLOW MODULES", font=("Segoe UI", 9, "bold"), foreground="#555").pack(
+            anchor="w", padx=15, pady=(20, 5)
+        )
+
         for label, (mod_name, cls_name) in MODULES_MAP.items():
             btn = ttk.Button(self.sidebar, text=label, command=lambda m=mod_name, c=cls_name: self._load_module(m, c))
             btn.pack(fill=tk.X, padx=10, pady=2)
@@ -325,7 +345,9 @@ class HermesUnifiedApp:
         f_foot = ttk.Frame(self.sidebar, padding=10)
         f_foot.pack(side=tk.BOTTOM, fill=tk.X)
         device_col = "green" if self.context.device == "cuda" else "orange"
-        ttk.Label(f_foot, text=f"Engine: {self.context.device.upper()}", foreground=device_col, font=("Consolas", 8)).pack(anchor="w")
+        ttk.Label(
+            f_foot, text=f"Engine: {self.context.device.upper()}", foreground=device_col, font=("Consolas", 8)
+        ).pack(anchor="w")
 
     # ════════════════════════════════════════════════════════════════
     # LOGIC
@@ -347,15 +369,16 @@ class HermesUnifiedApp:
 
     def _on_participant_created(self, pid):
         if pid:
-            self.cb_part['values'] = self.context.participants
+            self.cb_part["values"] = self.context.participants
             self.cb_part.set(pid)
             self._on_participant_change(None)
-# Line 225-229: add guard for project_root
+
+    # Line 225-229: add guard for project_root
     def _open_input_folder(self):
         if not self.context.current_participant or not self.context.project_root:
             return
         path = os.path.join(self.context.project_root, "participants", self.context.current_participant, "input")
-        os.startfile(path) if os.name == 'nt' else os.system(f'open "{path}"')
+        os.startfile(path) if os.name == "nt" else os.system(f'open "{path}"')  # noqa: S606, S605
 
     def _load_module(self, mod_name, cls_name):
         if not self.context.current_participant:
@@ -364,7 +387,7 @@ class HermesUnifiedApp:
 
         # Lazy Import
         ViewClass = get_module_class(mod_name, cls_name)
-        
+
         # Check errors
         if isinstance(ViewClass, str):
             self._show_error(f"Failed to load module {mod_name}:\n{ViewClass}")
@@ -376,25 +399,26 @@ class HermesUnifiedApp:
         # Clear Content
         for w in self.content_area.winfo_children():
             w.destroy()
-        
+
         # Instantiate View
         try:
             # Container per padding
             container = ttk.Frame(self.content_area)
             container.pack(fill=tk.BOTH, expand=True)
-            
+
             # Init Module
             self.current_view = ViewClass(container, self.context)
-            
+
             # Salva info per reload
             self.current_view_info = (mod_name, cls_name)
-            
+
         except Exception as e:
             import traceback
+
             self._show_error(f"Error initializing {cls_name}:\n{e}\n\n{traceback.format_exc()}")
 
     def _reload_current_view(self):
-        if hasattr(self, 'current_view_info'):
+        if hasattr(self, "current_view_info"):
             mod, cls = self.current_view_info
             self._load_module(mod, cls)
 
@@ -405,7 +429,9 @@ class HermesUnifiedApp:
         f.place(relx=0.5, rely=0.5, anchor="center")
         ttk.Label(f, text="HERMES Project Loaded", font=("Segoe UI", 20)).pack()
         ttk.Label(f, text=f"Root: {self.context.project_root}", foreground="gray").pack(pady=5)
-        ttk.Label(f, text="Select a Participant and a Module from the sidebar to begin.", foreground="gray").pack(pady=20)
+        ttk.Label(f, text="Select a Participant and a Module from the sidebar to begin.", foreground="gray").pack(
+            pady=20
+        )
 
     def _show_error(self, msg):
         for w in self.content_area.winfo_children():
@@ -417,6 +443,7 @@ class HermesUnifiedApp:
         text.insert("1.0", msg)
         text.config(state="disabled")
         text.pack(pady=20)
+
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()

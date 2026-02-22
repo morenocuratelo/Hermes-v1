@@ -1,11 +1,13 @@
 import ast
 import os
 
+
 class HermesValidator:
     """
     Analizzatore statico per il progetto HERMES.
     Verifica la separazione MVC (Model-View-Controller) e il flusso dei dati.
     """
+
     def __init__(self):
         self.project_dir = os.getcwd()
         self.errors = []
@@ -17,7 +19,7 @@ class HermesValidator:
         if not os.path.exists(path):
             return
 
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             try:
                 source = f.read()
                 tree = ast.parse(source)
@@ -28,7 +30,7 @@ class HermesValidator:
         # 1. Identifica Classi Logic e View
         logic_classes = {}
         view_classes = {}
-        
+
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
                 # Euristica per identificare i ruoli delle classi dai nomi
@@ -59,10 +61,22 @@ class HermesValidator:
         for node in ast.walk(class_node):
             # Cerca attributi come tk.Label, ttk.Button
             if isinstance(node, ast.Attribute):
-                if isinstance(node.value, ast.Name) and node.value.id in ['tk', 'ttk', 'messagebox', 'filedialog', 'simpledialog']:
+                if isinstance(node.value, ast.Name) and node.value.id in [
+                    "tk",
+                    "ttk",
+                    "messagebox",
+                    "filedialog",
+                    "simpledialog",
+                ]:
                     return True
             # Cerca chiamate dirette se importate from tkinter import ...
-            if isinstance(node, ast.Name) and node.id in ['messagebox', 'filedialog', 'simpledialog', 'Label', 'Button']:
+            if isinstance(node, ast.Name) and node.id in [
+                "messagebox",
+                "filedialog",
+                "simpledialog",
+                "Label",
+                "Button",
+            ]:
                 return True
         return False
 
@@ -73,20 +87,20 @@ class HermesValidator:
             if isinstance(node, ast.Call):
                 if isinstance(node.func, ast.Attribute):
                     # Controlla self.logic.metodo()
-                    if isinstance(node.func.value, ast.Attribute) and node.func.value.attr == 'logic':
+                    if isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "logic":
                         calls.append(f"logic.{node.func.attr}")
                     # Controlla self.pm.metodo() (ProfileManager)
-                    elif isinstance(node.func.value, ast.Attribute) and node.func.value.attr == 'pm':
+                    elif isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "pm":
                         calls.append(f"pm.{node.func.attr}")
                     # Controlla self.context.metodo() (Per i Wizard e Main App)
-                    elif isinstance(node.func.value, ast.Attribute) and node.func.value.attr == 'context':
+                    elif isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "context":
                         calls.append(f"context.{node.func.attr}")
         return list(set(calls))
 
     def report(self):
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("   HERMES ARCHITECTURE REPORT   ")  # Removed f-prefix
-        print("="*60)
+        print("=" * 60)
         print(f"Directory: {self.project_dir}\n")
 
         if self.errors:
@@ -104,12 +118,12 @@ class HermesValidator:
         print("\n🔹 VERIFICHE SUPERATE (Pattern corretti):")
         for s in self.successes:
             print(f"  - {s}")  # Split into new line
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
 
 
 if __name__ == "__main__":
     validator = HermesValidator()
-    
+
     # Lista dei file da analizzare
     files = [
         "hermes_context.py",
@@ -121,11 +135,11 @@ if __name__ == "__main__":
         "hermes_region.py",
         "hermes_reviewer.py",
         "hermes_stats.py",
-        "hermes_unified.py"
+        "hermes_unified.py",
     ]
-    
+
     print(f"Analisi di {len(files)} script in corso...")
     for f in files:
         validator.check_file(f)
-    
+
     validator.report()

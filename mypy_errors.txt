@@ -1,0 +1,61 @@
+mypy.....................................................................[41mFailed[m
+[2m- hook id: mypy[m
+[2m- exit code: 1[m
+
+hermes_stats.py:788: error: Unsupported operand types for >= ("float" and "None")  [operator]
+hermes_stats.py:788: note: Left operand is of type "float | None"
+hermes_reviewer.py:29: error: Need type annotation for "cond_map" (hint: "cond_map: Dict[<type>, <type>] = ...")  [var-annotated]
+hermes_region.py:216: error: Incompatible types in assignment (expression has type "float", variable has type "int")  [assignment]
+hermes_region.py:223: error: Incompatible types in assignment (expression has type "float", variable has type "int")  [assignment]
+hermes_region.py:256: error: Incompatible types in assignment (expression has type "float", variable has type "int")  [assignment]
+hermes_region.py:257: error: Incompatible types in assignment (expression has type "float", variable has type "int")  [assignment]
+hermes_region.py:258: error: Incompatible types in assignment (expression has type "float", variable has type "int")  [assignment]
+hermes_region.py:259: error: Incompatible types in assignment (expression has type "float", variable has type "int")  [assignment]
+hermes_region.py:279: error: Incompatible types in assignment (expression has type "float", variable has type "int")  [assignment]
+hermes_region.py:286: error: Incompatible types in assignment (expression has type "float", variable has type "int")  [assignment]
+hermes_region.py:450: error: Need type annotation for "ghosts" (hint: "ghosts: List[<type>] = ...")  [var-annotated]
+hermes_region.py:451: error: Name "ghosts" already defined on line 450  [no-redef]
+hermes_region.py:520: error: Need type annotation for "items" (hint: "items: List[<type>] = ...")  [var-annotated]
+hermes_region.py:521: error: Name "items" already defined on line 520  [no-redef]
+hermes_region.py:796: error: Need type annotation for "cond_map" (hint: "cond_map: Dict[<type>, <type>] = ...")  [var-annotated]
+hermes_region.py:797: error: Name "cond_map" already defined on line 796  [no-redef]
+hermes_region.py:1471: error: Need type annotation for "strat_vars" (hint: "strat_vars: Dict[<type>, <type>] = ...")  [var-annotated]
+hermes_region.py:1472: error: Need type annotation for "rule_rows" (hint: "rule_rows: List[<type>] = ...")  [var-annotated]
+hermes_region.py:1473: error: Attribute "strat_vars" already defined on line 1471  [no-redef]
+hermes_region.py:1474: error: Name "rule_rows" already defined on line 1472  [no-redef]
+hermes_region.py:1576: error: Name "row" already defined on line 1575  [no-redef]
+hermes_region.py:1576: error: Name "Any" is not defined  [name-defined]
+hermes_region.py:1576: note: Did you forget to import it from "typing"? (Suggestion: "from typing import Any")
+hermes_region.py:1632: error: Cannot infer type of lambda  [misc]
+hermes_region.py:1634: error: Incompatible types in assignment (expression has type "StringVar", target has type "LabelFrame")  [assignment]
+hermes_region.py:1635: error: Incompatible types in assignment (expression has type "StringVar", target has type "LabelFrame")  [assignment]
+hermes_region.py:1636: error: Incompatible types in assignment (expression has type "IntVar", target has type "LabelFrame")  [assignment]
+hermes_region.py:1637: error: Incompatible types in assignment (expression has type "DoubleVar", target has type "LabelFrame")  [assignment]
+hermes_region.py:1638: error: Incompatible types in assignment (expression has type "DoubleVar", target has type "LabelFrame")  [assignment]
+hermes_region.py:1639: error: Incompatible types in assignment (expression has type "IntVar", target has type "LabelFrame")  [assignment]
+hermes_region.py:1640: error: Incompatible types in assignment (expression has type "Listbox", target has type "LabelFrame")  [assignment]
+hermes_region.py:1647: error: "LabelFrame" has no attribute "curselection"  [attr-defined]
+hermes_region.py:1653: error: "LabelFrame" has no attribute "get"  [attr-defined]
+hermes_region.py:1661: error: "LabelFrame" has no attribute "get"  [attr-defined]
+hermes_region.py:1665: error: "LabelFrame" has no attribute "get"  [attr-defined]
+hermes_region.py:1666: error: "LabelFrame" has no attribute "get"  [attr-defined]
+hermes_region.py:1667: error: "LabelFrame" has no attribute "get"  [attr-defined]
+hermes_region.py:1673: error: "LabelFrame" has no attribute "get"  [attr-defined]
+hermes_region.py:1678: error: "LabelFrame" has no attribute "get"  [attr-defined]
+hermes_region.py:2432: error: Cannot infer type of lambda  [misc]
+hermes_region.py:2441: error: Cannot infer type of lambda  [misc]
+hermes_region.py:2450: error: Cannot infer type of lambda  [misc]
+hermes_region.py:2459: error: Cannot infer type of lambda  [misc]
+hermes_human.py:18: error: Library stubs not installed for "requests"  [import-untyped]
+hermes_human.py:18: note: Hint: "python3 -m pip install types-requests"
+hermes_human.py:18: note: (or run "mypy --install-types" to install all missing stub packages)
+hermes_human.py:18: note: See https://mypy.readthedocs.io/en/stable/running_mypy.html#missing-imports
+hermes_human.py:94: error: Need type annotation for "queue"  [var-annotated]
+hermes_human.py:95: error: Attribute "queue" already defined on line 94  [no-redef]
+hermes_human.py:774: error: Incompatible types in assignment (expression has type "TextRedirector", variable has type "TextIO")  [assignment]
+hermes_human.py:775: error: Incompatible types in assignment (expression has type "TextRedirector", variable has type "TextIO")  [assignment]
+hermes_entity.py:242: error: Returning Any from function declared to return "int"  [no-any-return]
+Tools\download_models.py:232: error: Argument 2 to "ensure_model" has incompatible type "object"; expected "dict[Any, Any]"  [arg-type]
+hermes_unified.py:341: error: Cannot infer type of lambda  [misc]
+Found 50 errors in 7 files (checked 19 source files)
+

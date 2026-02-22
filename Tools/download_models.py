@@ -71,8 +71,8 @@ def is_valid_model_file(path: Path) -> bool:
 
 
 def download_with_urllib(url: str, dest: Path) -> None:
-    request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urlopen(request, timeout=60) as response, dest.open("wb") as output_file:
+    request = Request(url, headers={"User-Agent": "Mozilla/5.0"})  # noqa: S310
+    with urlopen(request, timeout=60) as response, dest.open("wb") as output_file:  # noqa: S310
         shutil.copyfileobj(response, output_file)
 
 
@@ -124,10 +124,7 @@ def build_sources(model_spec: dict) -> list[tuple[str, str]]:
 
     # Per compatibilita', manteniamo le vecchie env vars solo per YOLO principale.
     if filename == "yolo26x-pose.pt":
-        legacy_gdrive = (
-            os.environ.get("HERMES_MODEL_GDRIVE_URL")
-            or os.environ.get("HERMES_MODEL_GDRIVE_ID")
-        )
+        legacy_gdrive = os.environ.get("HERMES_MODEL_GDRIVE_URL") or os.environ.get("HERMES_MODEL_GDRIVE_ID")
         legacy_onedrive = os.environ.get("HERMES_MODEL_ONEDRIVE_URL")
         legacy_direct = os.environ.get("HERMES_MODEL_URL")
         if legacy_gdrive:

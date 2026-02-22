@@ -1,5 +1,7 @@
-import pandas as pd
 import os
+
+import pandas as pd
+
 
 def convert_csv_to_excel_ita():
     # Richiesta input utente
@@ -12,7 +14,7 @@ def convert_csv_to_excel_ita():
     try:
         # Lettura del CSV (presuppone formato standard USA: virgola come separatore, punto come decimale)
         # Se il file originale ha separatori diversi, modificare 'sep' qui sotto.
-        df = pd.read_csv(input_path, sep=',')
+        df = pd.read_csv(input_path, sep=",")
 
         # Generazione nome file output
         base, ext = os.path.splitext(input_path)
@@ -22,12 +24,13 @@ def convert_csv_to_excel_ita():
         # sep=';' -> Excel ITA usa il punto e virgola per separare le colonne
         # decimal=',' -> Excel ITA usa la virgola per i decimali
         # encoding='utf-8-sig' -> Garantisce corretta lettura caratteri speciali (accenti) su Excel Windows
-        df.to_csv(output_path, sep=';', decimal=',', index=False, encoding='utf-8-sig')
+        df.to_csv(output_path, sep=";", decimal=",", index=False, encoding="utf-8-sig")
 
         print(f"Conversione completata. File salvato come: {output_path}")
 
     except Exception as e:
         print(f"Si è verificato un errore critico: {e}")
+
 
 if __name__ == "__main__":
     convert_csv_to_excel_ita()
