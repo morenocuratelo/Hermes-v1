@@ -2474,7 +2474,8 @@ class RegionView:
             s_w.set(cur_w)
             s_w.grid(row=1, column=1, sticky="ew")
             s_w.bind(
-                "<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_w: self.update_rule_val(r, i, "scale_w", s.get()),  # type: ignore[misc]
+                "<ButtonRelease-1>",
+                lambda e, r=role_key, i=idx, s=s_w: self.update_rule_val(r, i, "scale_w", s.get()),  # type: ignore[misc]
             )
 
             # Height Scale
@@ -2484,7 +2485,8 @@ class RegionView:
             s_h.set(cur_h)
             s_h.grid(row=2, column=1, sticky="ew")
             s_h.bind(
-                "<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_h: self.update_rule_val(r, i, "scale_h", s.get()),  # type: ignore[misc]
+                "<ButtonRelease-1>",
+                lambda e, r=role_key, i=idx, s=s_h: self.update_rule_val(r, i, "scale_h", s.get()),  # type: ignore[misc]
             )
 
             # Bottom offset (only if present)
