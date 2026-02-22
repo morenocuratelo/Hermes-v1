@@ -2,6 +2,7 @@ import multiprocessing
 import os
 import sys
 import tkinter as tk
+from functools import partial
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 # Tentativo di importare un tema moderno (opzionale)
@@ -338,7 +339,7 @@ class HermesUnifiedApp:
         )
 
         for label, (mod_name, cls_name) in MODULES_MAP.items():
-            btn = ttk.Button(self.sidebar, text=label, command=lambda m=mod_name, c=cls_name: self._load_module(m, c))
+            btn = ttk.Button(self.sidebar, text=label, command=partial(self._load_module, mod_name, cls_name))
             btn.pack(fill=tk.X, padx=10, pady=2)
 
         # D. Footer

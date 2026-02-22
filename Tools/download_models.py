@@ -4,12 +4,13 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 MIN_MODEL_SIZE_BYTES = 1024 * 1024  # 1 MB safety threshold
 
-MODEL_SPECS = [
+MODEL_SPECS: list[dict[str, Any]] = [
     {
         "filename": "yolo26x-pose.pt",
         "targets": ("yolo26x-pose.pt", "Models/yolo26x-pose.pt"),

@@ -15,7 +15,7 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 import cv2
 import numpy as np
-import requests
+import requests  # type: ignore
 import torch
 from ultralytics import YOLO  # type: ignore
 

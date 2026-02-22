@@ -1,7 +1,1 @@
-mypy.....................................................................[41mFailed[m
-[2m- hook id: mypy[m
-[2m- exit code: 2[m
-
-hermes_stats.py:789: error: expected an indented block after 'if' statement on line 788  [syntax]
-Found 1 error in 1 file (errors prevented further checking)
-
+mypy.....................................................................[42mPassed[m

@@ -106,7 +106,7 @@ class RegionLogic:
 
     def __init__(self):
         self.pose_data = {}  # { frame_idx: { track_id: [[x,y,conf], ...] } }
-        self.identity_map = {}  # { "track_id_str": "RoleName" }
+        self.identity_map: dict[str, str] = {}  # { "track_id_str": "RoleName" }
         # {(frame_idx, track_id, role, aoi_name): (x1, y1, x2, y2)}
         self.manual_overrides = {}
         self.total_frames = 0
@@ -1673,7 +1673,7 @@ class RegionView:
                 if 0 <= int(kp_idx) < lb.size():
                     lb.selection_set(int(kp_idx))
 
-            tk.Button(lf, text="Remove Rule", fg="#c62828", command=lambda r=row: remove_rule(r)).pack(
+            tk.Button(lf, text="Remove Rule", fg="#c62828", command=lambda r=row: remove_rule(r)).pack(  # type: ignore[misc]
                 anchor="e", pady=(4, 0)
             )
 
@@ -2464,7 +2464,7 @@ class RegionView:
             s_margin.grid(row=0, column=1, sticky="ew")
             s_margin.bind(
                 "<ButtonRelease-1>",
-                lambda e, r=role_key, i=idx, s=s_margin: self.update_rule_val(r, i, "margin_px", s.get()),
+                lambda e, r=role_key, i=idx, s=s_margin: self.update_rule_val(r, i, "margin_px", s.get()),  # type: ignore[misc]
             )
 
             # Width Scale
@@ -2474,7 +2474,7 @@ class RegionView:
             s_w.set(cur_w)
             s_w.grid(row=1, column=1, sticky="ew")
             s_w.bind(
-                "<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_w: self.update_rule_val(r, i, "scale_w", s.get())
+                "<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_w: self.update_rule_val(r, i, "scale_w", s.get()),  # type: ignore[misc]
             )
 
             # Height Scale
@@ -2484,7 +2484,7 @@ class RegionView:
             s_h.set(cur_h)
             s_h.grid(row=2, column=1, sticky="ew")
             s_h.bind(
-                "<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_h: self.update_rule_val(r, i, "scale_h", s.get())
+                "<ButtonRelease-1>", lambda e, r=role_key, i=idx, s=s_h: self.update_rule_val(r, i, "scale_h", s.get()),  # type: ignore[misc]
             )
 
             # Bottom offset (only if present)
@@ -2495,7 +2495,7 @@ class RegionView:
                 s_off.grid(row=3, column=1, sticky="ew")
                 s_off.bind(
                     "<ButtonRelease-1>",
-                    lambda e, r=role_key, i=idx, s=s_off: self.update_rule_val(r, i, "offset_y_bottom", s.get()),
+                    lambda e, r=role_key, i=idx, s=s_off: self.update_rule_val(r, i, "offset_y_bottom", s.get()),  # type: ignore[misc]
                 )
 
     def update_rule_val(self, role, idx, key, val):

@@ -221,21 +221,21 @@ class IdentityLogic:
 
     def manual_merge(self, ids: list[Any], valid_roles: dict | None = None) -> int:
         with self.lock:
-            ids = sorted([int(x) for x in ids])  # Ensure ints
-            master = ids[0]
+            int_ids = sorted([int(x) for x in ids])  # Ensure ints
+            master = int_ids[0]
 
             final_role = self.tracks[master]["role"]
             if valid_roles:
-                for s in ids[1:]:
+                for s in int_ids[1:]:
                     if s in self.tracks:
                         s_role = self.tracks[s]["role"]
                         if final_role not in valid_roles and s_role in valid_roles:
                             final_role = s_role
 
-            for s in ids[1:]:
+            for s in int_ids[1:]:
                 self.merge_logic(master, s)
             self.tracks[master]["role"] = final_role
-            self._log_operation("Manual Merge", {"master": master, "merged_ids": ids, "final_role": final_role})
+            self._log_operation("Manual Merge", {"master": master, "merged_ids": int_ids, "final_role": final_role})
             return master
 
     def merge_all_by_role(self, cast: dict[str, dict]) -> tuple[int, list[str]]:
