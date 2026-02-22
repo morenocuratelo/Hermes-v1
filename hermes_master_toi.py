@@ -475,7 +475,8 @@ class TOIGenerator:
 
         if matlab_anchor_col not in df.columns:
             raise ValueError(
-                f"Error: Sync column '{matlab_anchor_col}' defined in profile does NOT exist in loaded CSV.\nAvailable columns: {list(df.columns)}"
+                f"Error: Sync column '{matlab_anchor_col}' defined in profile does NOT exist in loaded CSV.\n"
+                f"Available columns: {list(df.columns)}"
             )
 
         # Leggi orario Matlab

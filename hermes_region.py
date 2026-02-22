@@ -8,6 +8,7 @@ import threading
 import tkinter as tk
 from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
+from typing import Any
 
 import cv2
 import pandas as pd

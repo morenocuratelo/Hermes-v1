@@ -15,7 +15,7 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 import cv2
 import numpy as np
-import requests  # type: ignore
+import requests
 import torch
 from ultralytics import YOLO  # type: ignore
 
@@ -95,7 +95,6 @@ class ResultsWriter(threading.Thread):
         self.path = path
         self.compress_level = compress_level
         self.queue: queue.Queue = queue.Queue(maxsize=256)  # Buffer di ~250 frame
-        self.queue: queue.Queue = queue.Queue(maxsize=256)  # type: ignore # Buffer di ~250 frame
         self.stop_event = threading.Event()
         self.error = None
 
